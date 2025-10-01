@@ -20,7 +20,7 @@ Select a Stop: Addresses populate the left column. Selecting an address loads it
 
 Edit Fields: Use the color-coded dropdowns and text inputs on the right to log the outcome of the delivery attempt. Changes are saved automatically upon interaction.
 
-Street View Panorama: Click the Street View image (bottom right) to open the full interactive panorama in your default web browser for context.
+Street View Panorama: Click the Street View image (bottom right) to open the full interactive panorama in your default web browser for context. Hold right click and drag slowly to pan the camera around. Zoom in by hovering over the streetview image and using scrollwheel up/down.
 
 3. Copy & Paste Data
 This feature is designed for quickly logging identical outcomes across multiple stops:
