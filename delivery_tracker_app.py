@@ -6,135 +6,35 @@ from datetime import datetime
 import requests
 from PIL import Image, ImageTk
 import io
-# NEW BROWSER IMPORT
-import webbrowser # <-- ADDED THIS IMPORT
-
-# NEW GEMINI IMPORTS
+import webbrowser
 from google import genai
 from google.genai.errors import APIError
 from io import StringIO
+import math
 
-# ---------- Colorized dropdown widget (toggle + click-away) ----------
-class ColorDropdown(tk.Frame):
-    """Colored dropdown using an overrideredirect Toplevel menu."""
-    def __init__(self, parent, options, color_map, on_change=None):
-        super().__init__(parent)
-        self.options = options
-        self.color_map = color_map
-        self.on_change = on_change
-        self.value = ""
-        self.dropdown = None
-        self.label = tk.Label(self, text="", bd=1, relief="solid", padx=8, pady=4, cursor="hand2")
-        self.label.pack(fill="x", expand=True)
-        # open/close toggle
-        self.label.bind("<Button-1>", self._on_label_click)
-        self.label.bind("<space>", self._on_label_key)
-        self.label.bind("<Return>", self._on_label_key)
-        # global click-away closer
-        self.winfo_toplevel().bind("<ButtonRelease-1>", self._on_root_click, add="+")
-        
-    def _on_label_click(self, _e):
-        self._open_menu()
-        return "break"
-        
-    def _on_label_key(self, _e):
-        self._open_menu()
-        return "break"
-        
-    def _open_menu(self, *_):
-        # toggle
-        if self.dropdown and self.dropdown.winfo_exists():
-            self._close_menu()
-            return
-            
-        self.dropdown = tk.Toplevel(self)
-        self.dropdown.overrideredirect(True)
-        self.dropdown.transient(self.winfo_toplevel())
-        try:
-            self.dropdown.wm_attributes("-topmost", True)
-        except Exception:
-            pass
-            
-        # position under the widget
-        x = self.winfo_rootx()
-        y = self.winfo_rooty() + self.winfo_height()
-        self.dropdown.geometry(f"+{x}+{y}")
-        self.dropdown.bind("<Escape>", lambda e: self._close_menu())
-        self.dropdown.focus_set()
-        
-        # items
-        for opt in self.options:
-            bg, fg = self.color_map.get(opt, ("#f0f0f0", "#000"))
-            item = tk.Label(self.dropdown, text=opt, bg=bg, fg=fg, padx=10, pady=6)
-            item.pack(fill="x")
-            item.bind("<Enter>", lambda e, w=item: w.configure(relief="solid", bd=1))
-            item.bind("<Leave>", lambda e, w=item: w.configure(relief="flat", bd=0))
-            item.bind("<Button-1>", lambda e, val=opt: self._select(val))
-            
-    def _close_menu(self):
-        if self.dropdown and self.dropdown.winfo_exists():
-            try:
-                self.dropdown.destroy()
-            except Exception:
-                pass
-        self.dropdown = None
-        
-    def _on_root_click(self, event):
-        # no menu; nothing to do
-        if not (self.dropdown and self.dropdown.winfo_exists()):
-            return
-        # click inside menu? ignore
-        if self._point_in_widget(self.dropdown, event.x_root, event.y_root):
-            return
-        # click on opener label? let the label handler toggle instead
-        if self._point_in_widget(self.label, event.x_root, event.y_root):
-            return
-        self._close_menu()
-        
-    def _point_in_widget(self, widget, x_root, y_root):
-        try:
-            wx = widget.winfo_rootx()
-            wy = widget.winfo_rooty()
-            ww = widget.winfo_width()
-            wh = widget.winfo_height()
-            return wx <= x_root <= wx + ww and wy <= y_root <= wy + wh
-        except Exception:
-            return False
-            
-    def _select(self, val):
-        self.set(val)
-        self._close_menu()
-        if callable(self.on_change):
-            self.on_change()
-            
-    def set(self, val: str):
-        self.value = val or ""
-        bg, fg = self.color_map.get(self.value, ("#ffffff", "#000000"))
-        text = self.value if self.value else "Select…"
-        self.label.configure(text=text, bg=bg, fg=fg)
-        
-    def get(self) -> str:
-        return self.value
-        
 # -------------------------------------------------------------------
-# Global state
+# Global state and API Keys
+# -------------------------------------------------------------------
 delivery_data = []
 selected_row_id = None
 input_widgets = {}
 summary_inputs = {}
 copied_data = {} 
+current_street_view_url = "" 
+image_cache = {}
+street_view_image_label = None
 
-# NEW GLOBAL URL VARIABLE
-current_street_view_url = "" # <-- ADDED THIS
+# IMAGE INTERACTION GLOBALS
+current_address_for_image = ""
+current_heading = 0
+current_fov = 90
+last_mouse_x = 0
 
 # NOTE: REPLACE THESE WITH YOUR ACTUAL KEYS!
 google_api_key = "AIzaSyBKE225e5Eq4tEyAPqJXO_Hd5grSeoYcqc" # Google Maps Street View API Key
 GEMINI_API_KEY = "AIzaSyCDcp2WtRkpsuUsr3b3rTN_mkErQXsdv1I" # Gemini API Key for image processing
 
-image_cache = {}
-street_view_image_label = None
-
-# Field definitions
+# Field definitions (truncated for brevity)
 field_map = {
     "Date": {"type": "input"},
     "Function": {"type": "dropdown", "options": ["Commercial", "R&D/Testing"]},
@@ -156,15 +56,14 @@ field_map = {
     "Operator Comments": {"type": "input"},
 }
 
-# ---------- Color schemes ----------
-# Corrected invalid non-printable characters (U+00A0)
-GREEN = "#1f7a3f"  # dark green pill
-RED = "#a31212"    # red pill
-YELLOW = "#f1d48a" # yellow tag
-LGRAY = "#d9d9d9"  # light gray
+# ---------- Color schemes (truncated for brevity) ----------
+GREEN = "#1f7a3f"
+RED = "#a31212"
+YELLOW = "#f1d48a"
+LGRAY = "#d9d9d9"
 FG_ON = "#ffffff"
 FG_OFF = "#000000"
-LGREEN = "#cfecc9" # light green tag (for partial return)
+LGREEN = "#cfecc9"
 
 COLOR_SCHEMES = {
     "Success": {
@@ -226,56 +125,196 @@ COLOR_SCHEMES = {
     },
 }
 
-# ----------------- NEW GEMINI FUNCTIONS (Updated for Multi-File) -----------------
+# ---------- Colorized dropdown widget (toggle + click-away) ----------
+class ColorDropdown(tk.Frame):
+    """Colored dropdown using an overrideredirect Toplevel menu."""
+    EMPTY_VALUE = "" 
+    
+    def __init__(self, parent, options, color_map, on_change=None):
+        super().__init__(parent)
+        self.options = options
+        self.color_map = color_map
+        self.on_change = on_change
+        self.value = self.EMPTY_VALUE
+        self.dropdown = None
+        self.label = tk.Label(self, text="", bd=1, relief="solid", padx=8, pady=4, cursor="hand2")
+        self.label.pack(fill="x", expand=True)
+        self.label.bind("<Button-1>", self._on_label_click)
+        self.label.bind("<space>", self._on_label_key)
+        self.label.bind("<Return>", self._on_label_key)
+        self.winfo_toplevel().bind("<ButtonRelease-1>", self._on_root_click, add="+")
+        
+    def _on_label_click(self, _e):
+        self._open_menu()
+        return "break"
+        
+    def _on_label_key(self, _e):
+        self._open_menu()
+        return "break"
+        
+    def _open_menu(self, *_):
+        if self.dropdown and self.dropdown.winfo_exists():
+            self._close_menu()
+            return
+            
+        self.dropdown = tk.Toplevel(self)
+        self.dropdown.overrideredirect(True)
+        self.dropdown.transient(self.winfo_toplevel())
+        try:
+            self.dropdown.wm_attributes("-topmost", True)
+        except Exception:
+            pass
+            
+        x = self.winfo_rootx()
+        y = self.winfo_rooty() + self.winfo_height()
+        self.dropdown.geometry(f"+{x}+{y}")
+        self.dropdown.bind("<Escape>", lambda e: self._close_menu())
+        self.dropdown.focus_set()
+        
+        # --- Add the CLEAR/RESET option ---
+        reset_val = self.EMPTY_VALUE
+        reset_item = tk.Label(
+            self.dropdown, 
+            text="-- Clear Selection --", 
+            bg="#ffffff", 
+            fg="#999999", 
+            padx=10, 
+            pady=6,
+            font=("TkDefaultFont", 10, "italic")
+        )
+        reset_item.pack(fill="x")
+        reset_item.bind("<Enter>", lambda e, w=reset_item: w.configure(relief="solid", bd=1))
+        reset_item.bind("<Leave>", lambda e, w=reset_item: w.configure(relief="flat", bd=0))
+        reset_item.bind("<Button-1>", lambda e, val=reset_val: self._select(val))
+        
+        # Separator
+        ttk.Separator(self.dropdown, orient=tk.HORIZONTAL).pack(fill='x', pady=2)
+        # --- END NEW ---
+        
+        # Items (existing options)
+        for opt in self.options:
+            bg, fg = self.color_map.get(opt, ("#f0f0f0", "#000"))
+            item = tk.Label(self.dropdown, text=opt, bg=bg, fg=fg, padx=10, pady=6)
+            item.pack(fill="x")
+            item.bind("<Enter>", lambda e, w=item: w.configure(relief="solid", bd=1))
+            item.bind("<Leave>", lambda e, w=item: w.configure(relief="flat", bd=0))
+            item.bind("<Button-1>", lambda e, val=opt: self._select(val))
+            
+    def _close_menu(self):
+        if self.dropdown and self.dropdown.winfo_exists():
+            try:
+                self.dropdown.destroy()
+            except Exception:
+                pass
+        self.dropdown = None
+        
+    def _on_root_click(self, event):
+        if not (self.dropdown and self.dropdown.winfo_exists()):
+            return
+        if self._point_in_widget(self.dropdown, event.x_root, event.y_root):
+            return
+        if self._point_in_widget(self.label, event.x_root, event.y_root):
+            return
+        self._close_menu()
+        
+    def _point_in_widget(self, widget, x_root, y_root):
+        try:
+            wx = widget.winfo_rootx()
+            wy = widget.winfo_rooty()
+            ww = widget.winfo_width()
+            wh = widget.winfo_height()
+            return wx <= x_root <= wx + ww and wy <= y_root <= wy + wh
+        except Exception:
+            return False
+            
+    def _select(self, val):
+        self.set(val)
+        self._close_menu()
+        if callable(self.on_change):
+            # Pass the field name to save_data for bulk update logic
+            field_name = self.master.winfo_children()[0].cget("text").replace(":", "") 
+            self.on_change(field_name)
+            
+    def set(self, val: str):
+        self.value = val or self.EMPTY_VALUE 
+        
+        if self.value == self.EMPTY_VALUE:
+            bg, fg = ("#ffffff", "#000000")
+            text = "Select…"
+        else:
+            bg, fg = self.color_map.get(self.value, ("#ffffff", "#000000"))
+            text = self.value
+            
+        self.label.configure(text=text, bg=bg, fg=fg)
+        
+    def get(self) -> str:
+        return self.value
+
+# -------------------------------------------------------------------
+# Treeview Tag Helper Functions
+# -------------------------------------------------------------------
+
+def get_tag_from_success_value(success_value: str) -> str:
+    """Maps the Success field value to a Treeview tag name."""
+    tag_map = {
+        "Yes": 'Success-Yes',
+        "No": 'Success-No',
+        "Skipped by robot": 'Success-Skipped',
+        "Missing": 'Success-Missing',
+        "": 'Success-None'
+    }
+    return tag_map.get(success_value, 'Success-None')
+
+def apply_success_tag(item_id, success_value):
+    """Removes all success-related tags and applies the new one."""
+    current_tags = tree.item(item_id, 'tags')
+    # Remove old success tags
+    new_tags = [t for t in current_tags if not t.startswith('Success-')]
+    
+    # Add new tag
+    new_tag = get_tag_from_success_value(success_value)
+    if new_tag not in new_tags:
+        new_tags.append(new_tag)
+        
+    tree.item(item_id, tags=tuple(new_tags))
+
+# -------------------------------------------------------------------
+# Core Application Functions
+# -------------------------------------------------------------------
 
 def generate_csv_from_image(image_filepaths, date, robot_id, popup_window, status_label_popup):
-    """
-    Sends multiple image files to the Gemini API, extracts addresses from each,
-    concatenates the results, and then starts the data loading process.
-    """
+    """Sends images to Gemini, extracts and loads data."""
     try:
         if GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE" or not GEMINI_API_KEY:
             status_label_popup.config(text="Error: Please set your actual GEMINI_API_KEY.", foreground="red")
             return
             
         client = genai.Client(api_key=GEMINI_API_KEY)
-        
         all_csv_content = []
         
-        # Define a cleaning function to remove non-CSV lines
         def clean_csv_output(text, is_first_image):
-            # Split lines and filter out lines that clearly aren't CSV data/header
             lines = text.strip().split('\n')
             clean_lines = []
-            
-            # The header line we expect (case-insensitive check)
             expected_header_lower = "stop number,address"
             
             for line in lines:
                 line_stripped = line.strip().lower()
                 
-                # Rule 1: Skip if it looks like a markdown pipe table separator or extra text
                 if "---" in line_stripped or "here is the extracted data" in line_stripped:
                     continue
-                
-                # Rule 2: Skip any line that starts with { (likely JSON) or just text
                 if line_stripped.startswith('{') or line_stripped.startswith('"'):
                     continue
                 
-                # Rule 3: Handle the header row
                 is_header_match = line_stripped.replace('"', '').replace("'", '').replace(' ', '') == expected_header_lower.replace(' ', '')
                 
                 if is_header_match:
-                    # If it's the first image, keep the header. Otherwise, skip it.
                     if is_first_image:
                         clean_lines.append(line)
                     continue
 
-                # Rule 4: Must contain a comma (the CSV separator) to be considered data
                 if ',' in line:
                     clean_lines.append(line)
                     
-            # If it's the first image, and we didn't find the header, add a fallback header
             if is_first_image and not any("Stop Number" in l and "Address" in l for l in clean_lines):
                  clean_lines.insert(0, "Stop Number,Address")
                  
@@ -305,7 +344,6 @@ def generate_csv_from_image(image_filepaths, date, robot_id, popup_window, statu
                 status_label_popup.config(text=f"Gemini returned empty data for {filepath.split('/')[-1]}.", foreground="red")
                 continue
 
-            # Clean the output before combining
             cleaned_content = clean_csv_output(csv_content, is_first_image=(i == 0))
             if cleaned_content:
                 all_csv_content.append(cleaned_content)
@@ -314,9 +352,8 @@ def generate_csv_from_image(image_filepaths, date, robot_id, popup_window, statu
             status_label_popup.config(text="No valid data was generated from any image.", foreground="red")
             return
             
-        # Join all content
-        final_csv_string = "\n".join(all_csv_content)
-        
+        final_csv_string = all_csv_content[0] + "\n" + "\n".join(all_csv_content[1:])
+
         popup_window.destroy()
         start_data_load(final_csv_string, date, robot_id, is_content=True) 
         
@@ -345,26 +382,23 @@ def show_image_to_csv_popup(date, robot_id):
     status_label_popup = ttk.Label(popup_frame, text="", foreground="black")
     status_label_popup.pack(pady=(0, 10))
     
-    selected_filepaths = [] # Now a list/tuple of paths
+    selected_filepaths = [] 
 
     def select_image_file():
         nonlocal selected_filepaths
         
-        # MODIFIED: Use askopenfilenames (plural) to allow multiple selections
         filepaths = filedialog.askopenfilenames( 
             title="Select Image Files",
-            initialdir="/home/mason/Desktop/images", # Added initialdir fix
+            initialdir="/home/mason/Desktop/images",
             filetypes=[
                 ("Image files", "*.png;*.jpg;*.jpeg"),
-                ("All Files", "*.*") # Added "All Files" fix
+                ("All Files", "*.*")
             ]
         )
         
-        # The result is a tuple of file paths.
         if filepaths:
             selected_filepaths = filepaths 
             
-            # Update the label to show how many files were selected
             if len(filepaths) == 1:
                  file_path_var.set(f".../{filepaths[0].split('/')[-1]}")
             else:
@@ -379,7 +413,6 @@ def show_image_to_csv_popup(date, robot_id):
 
     def generate_and_continue():
         if selected_filepaths:
-            # Pass the tuple of file paths
             generate_csv_from_image(selected_filepaths, date, robot_id, popup, status_label_popup)
 
     select_button = ttk.Button(popup_frame, text="Browse for Images", command=select_image_file)
@@ -387,8 +420,6 @@ def show_image_to_csv_popup(date, robot_id):
 
     generate_button = ttk.Button(popup_frame, text="Generate & Continue", command=generate_and_continue, state=tk.DISABLED)
     generate_button.pack()
-
-# ----------------- MODIFIED EXISTING FUNCTIONS -----------------
 
 def choose_csv_file():
     """Menu to choose between loading an existing CSV or generating from an image."""
@@ -417,9 +448,7 @@ def choose_csv_file():
     ttk.Button(popup_frame, text="2. Generate from Image (Gemini API)", command=select_generate_from_image).pack(fill='x', pady=5)
 
 def show_confirmation_popup(filepath=None, is_image_mode=False):
-    """
-    Modified to handle both CSV file selection and image generation flow.
-    """
+    """Confirmation popup for report details."""
     popup = tk.Toplevel(root)
     popup.title("Confirm Report Details")
     popup.grab_set()
@@ -462,21 +491,19 @@ def show_confirmation_popup(filepath=None, is_image_mode=False):
 
 def start_data_load(source, date, robot_id, is_content=False):
     """
-    Modified to accept either a file path or the CSV content string directly,
-    and now includes logic to SKIP duplicate rows (ID + Address match).
+    Loads data into the application.
+    MODIFIED: Now applies the success tag to the Treeview item on load.
     """
     global delivery_data
     delivery_data = []
     for row in tree.get_children():
         tree.delete(row)
         
-    # Set to store unique (ID in the Route, Address) tuples
     unique_rows = set()
     rows_skipped = 0 
     
     try:
         if is_content:
-            # StringIO creates a file-like object from the CSV string
             csvfile = StringIO(source)
             reader = csv.DictReader(csvfile)
             source_name = "Gemini Generated Data"
@@ -502,15 +529,15 @@ def start_data_load(source, date, robot_id, is_content=False):
         for row in reader:
             new_row = {header: '' for header in field_map.keys()}
             
-            # 1. Map fields from the source data
             for key, value in row.items():
                 if key in new_row:
                     new_row[key] = value
             
-            # 2. Populate fixed fields and map the route ID
             new_row['Date'] = date
             new_row['Robot ID'] = robot_id
-            new_row['Function'] = new_row.get('Function', 'Commercial') 
+            
+            # Use 'Commercial' if the 'Function' field is not present or is empty in the source data.
+            new_row['Function'] = new_row.get('Function', 'Commercial') or 'Commercial' 
             
             if id_column_name == 'Stop Number':
                 route_id = row.get('Stop Number', '').strip()
@@ -521,19 +548,27 @@ def start_data_load(source, date, robot_id, is_content=False):
             
             address = new_row.get('Address', '').strip()
 
-            # 3. Enforce Uniqueness
             if route_id and address:
                 key = (route_id, address)
                 
                 if key in unique_rows:
                     rows_skipped += 1
-                    continue  # Skip this row, it's a duplicate
+                    continue
                 
                 unique_rows.add(key)
                 
-                # 4. Append and insert into Treeview
+                # Default the Success field if it's not valid
+                success_value = new_row.get('Success', '')
+                if success_value not in field_map['Success']['options']:
+                    success_value = ''
+                new_row['Success'] = success_value
+                
                 delivery_data.append(new_row)
-                tree.insert("", "end", values=(route_id, address))
+                item_id = tree.insert("", "end", values=(route_id, address))
+                
+                # --- Apply the initial success tag ---
+                apply_success_tag(item_id, success_value)
+                # ----------------------------------------
             
         if not is_content: csvfile.close()
 
@@ -548,13 +583,13 @@ def start_data_load(source, date, robot_id, is_content=False):
             try: csvfile.close()
             except: pass
             
-# ----------------- UNMODIFIED EXISTING FUNCTIONS -----------------
-
 def on_tree_select(event):
-    global selected_row_id
+    global selected_row_id, current_address_for_image, current_heading, current_fov
     selected_items = tree.selection()
     if not selected_items:
         return
+    
+    # Only populate fields and fetch image for the first selected item
     selected_row_id = selected_items[0]
     item_index = tree.index(selected_row_id)
     selected_stop = delivery_data[item_index]
@@ -562,9 +597,66 @@ def on_tree_select(event):
     
     address_to_fetch = selected_stop.get('Address', '')
     if address_to_fetch:
-        fetch_and_display_street_view(address_to_fetch)
+        # 1. Reset address and FOV
+        current_address_for_image = address_to_fetch
+        current_fov = 90
+        # 2. DO NOT set the heading. Pass None so fetch_and_display_street_view skips it.
+        fetch_and_display_street_view(address_to_fetch, heading=None, fov=current_fov)
+
+def zoom_image(event):
+    """Handles scroll wheel events for zooming in/out (changing FOV)."""
+    global current_fov, current_address_for_image, current_heading
+    
+    if not current_address_for_image:
+        return
+        
+    if event.num == 5 or event.delta < 0: # Scroll Down (Zoom Out)
+        current_fov = min(current_fov + 10, 100)
+    elif event.num == 4 or event.delta > 0: # Scroll Up (Zoom In)
+        current_fov = max(current_fov - 10, 10)
+    else:
+        return
+        
+    fetch_and_display_street_view(current_address_for_image, current_heading, current_fov)
+
+def start_pan(event):
+    """Saves the starting x-coordinate of the mouse for panning (right click)."""
+    global last_mouse_x, current_address_for_image
+    if current_address_for_image:
+        last_mouse_x = event.x
+
+def do_pan(event):
+    """Calculates the change in heading based on mouse drag and updates the image."""
+    global last_mouse_x, current_heading, current_address_for_image
+    
+    if not current_address_for_image:
+        return
+
+    dx = event.x - last_mouse_x
+    
+    sensitivity = 0.5 * (current_fov / 90.0) 
+    
+    delta_heading = dx * sensitivity
+
+    new_heading = current_heading - delta_heading
+    new_heading %= 360
+    if new_heading < 0:
+        new_heading += 360
+    
+    current_heading = new_heading
+    last_mouse_x = event.x
+
+    fetch_and_display_street_view(current_address_for_image, current_heading, current_fov, cache_result=False)
+
+def stop_pan(event):
+    """Finalizes the pan action by fetching the final image and caching it."""
+    global current_address_for_image, current_heading, current_fov
+    if current_address_for_image:
+        fetch_and_display_street_view(current_address_for_image, current_heading, current_fov, cache_result=True)
+        status_label.config(text=f"Image panned to {int(current_heading)}° heading. Click image to open in browser.")
 
 def populate_input_fields(data):
+    """Populates the input widgets with data for the selected row."""
     for key, widget in input_widgets.items():
         value = data.get(key, '')
         if isinstance(widget, ttk.Combobox):
@@ -573,22 +665,87 @@ def populate_input_fields(data):
             widget.delete(0, tk.END)
             widget.insert(0, value)
         elif isinstance(widget, ColorDropdown):
-            widget.set(value)
-
-def save_data():
+            widget.set(value if value else ColorDropdown.EMPTY_VALUE)
+            
+def save_data(field_name_changed=None):
+    """
+    Saves data from input fields to all currently selected rows in delivery_data.
+    MODIFIED: Now updates the Treeview tag if the "Success" field is changed.
+    """
     global selected_row_id
-    if selected_row_id is None:
+    selected_items = tree.selection()
+    
+    if not selected_items:
         return
-    item_index = tree.index(selected_row_id)
-    for key, widget in input_widgets.items():
-        if isinstance(widget, ttk.Combobox):
-            delivery_data[item_index][key] = widget.get()
-        elif isinstance(widget, ttk.Entry):
-            delivery_data[item_index][key] = widget.get()
-        elif isinstance(widget, ColorDropdown):
-            delivery_data[item_index][key] = widget.get()
 
+    # Determine which field(s) to update and what the new value is
+    update_data = {}
+    current_field_name = None
+    
+    if field_name_changed:
+        # BULK UPDATE MODE: Only update the field that triggered the call
+        current_field_name = field_name_changed
+        widget = input_widgets.get(field_name_changed)
+        if widget is None:
+            return
+
+        if isinstance(widget, ttk.Entry):
+            update_data[field_name_changed] = widget.get()
+        elif isinstance(widget, ColorDropdown):
+            update_data[field_name_changed] = widget.get()
+        elif isinstance(widget, ttk.Combobox):
+            update_data[field_name_changed] = widget.get()
+            
+    else:
+        # SINGLE UPDATE MODE: Only update the first selected row (e.g., Entry keypress)
+        focused_widget = root.focus_get()
+        
+        for name, widget in input_widgets.items():
+            if widget is focused_widget or widget.winfo_children() and focused_widget in widget.winfo_children():
+                 current_field_name = name
+                 break
+                 
+        if current_field_name:
+            widget = input_widgets.get(current_field_name)
+            if isinstance(widget, ttk.Entry):
+                update_data[current_field_name] = widget.get()
+            # Dropdowns are handled by the 'field_name_changed' path
+        else:
+             # Fallback to update everything for the *first* selected item if the focus isn't clear
+             first_selected_index = tree.index(selected_items[0])
+             for key, widget in input_widgets.items():
+                if isinstance(widget, ttk.Combobox):
+                    delivery_data[first_selected_index][key] = widget.get()
+                elif isinstance(widget, ttk.Entry):
+                    delivery_data[first_selected_index][key] = widget.get()
+                elif isinstance(widget, ColorDropdown):
+                    delivery_data[first_selected_index][key] = widget.get()
+             return
+
+
+    # Apply the update_data to all selected rows
+    success_updated = (current_field_name == 'Success') and ('Success' in update_data)
+    new_success_value = update_data.get('Success')
+    
+    for item in selected_items:
+        item_index = tree.index(item)
+        
+        # Skip the two columns that MUST NOT be bulk-edited: ID in the Route and Address
+        fields_to_update = {k: v for k, v in update_data.items() 
+                            if k not in ['ID in the Route', 'Address']}
+        
+        delivery_data[item_index].update(fields_to_update)
+        
+        # --- Update the Treeview tag if Success changed ---
+        if success_updated:
+            apply_success_tag(item, new_success_value)
+        # ----------------------------------------------------
+        
+    if current_field_name:
+        status_label.config(text=f"Updated '{current_field_name}' for {len(selected_items)} item(s).")
+            
 def export_csv_file():
+    """Exports all current data to a CSV file."""
     if not delivery_data:
         status_label.config(text="No data to export. Please load a CSV first.")
         return
@@ -607,14 +764,16 @@ def export_csv_file():
             status_label.config(text=f"Report saved to '{filepath.split('/')[-1]}'")
         except Exception as e:
             status_label.config(text=f"An error occurred while exporting: {e}")
-
+            
 def show_data_summary():
-    """Generates a summary report popup based on the aggregated data."""
+    """
+    Generates a summary report popup based on the aggregated data.
+    FIXED: Calculates 'Intended # of Robot Deliveries' to only count stops explicitly marked 'Yes' or 'No'.
+    """
     if not delivery_data:
         status_label.config(text="No data to summarize. Please load a CSV first.")
         return
         
-    # Calculate key metrics from the loaded data
     total_deliveries = len(delivery_data)
     robot_deliveries = 0
     autonomous_returns = 0
@@ -628,9 +787,18 @@ def show_data_summary():
     missing_payload_functionalities = 0
     too_risky_paths = 0
     
+    intended_robot_deliveries = 0
+    
     for row in delivery_data:
-        if row.get("Success") == "Yes":
+        success_status = row.get("Success")
+        
+        # --- FIX APPLIED HERE: Only count stops with definite Yes or No status ---
+        if success_status in ["Yes", "No"]:
+            intended_robot_deliveries += 1
+            
+        if success_status == "Yes":
             robot_deliveries += 1
+            
         if row.get("Autonomous Return") in ["Successful", "Successful partial return"]:
             autonomous_returns += 1
         if row.get("Soft help from Field Operator") == "Needed help":
@@ -652,7 +820,6 @@ def show_data_summary():
         if row.get("Too risky to try") == "Too risky":
             too_risky_paths += 1
 
-    # Create the popup window
     popup = tk.Toplevel(root)
     popup.title("Real-World Deliveries Summary")
     popup.transient(root)
@@ -688,8 +855,12 @@ def show_data_summary():
     current_row += 1
     add_label_row(summary_frame, current_row, "Total # of Deliveries:", str(total_deliveries))
     current_row += 1
-    add_entry_row(summary_frame, current_row, "Intended # of Robot Deliveries:", "")
+    
+    # --- MODIFIED: Calculated and displayed as a label ---
+    add_label_row(summary_frame, current_row, "Intended # of Robot Deliveries:", str(intended_robot_deliveries))
     current_row += 1
+    # ----------------------------------------------------
+    
     add_label_row(summary_frame, current_row, "# of Robot Deliveries:", str(robot_deliveries))
     current_row += 1
     add_label_row(summary_frame, current_row, "# of Autonomous Returns:", str(autonomous_returns))
@@ -755,19 +926,24 @@ def paste_data():
     for item in selected_items:
         item_index = tree.index(item)
         
-        # Save unique fields before pasting
+        # Preserve the essential, unique fields
         temp_id = delivery_data[item_index]['ID in the Route']
         temp_address = delivery_data[item_index]['Address']
         
-        # Update the entire row with copied data
+        # Apply the copied data
         delivery_data[item_index].update(copied_data)
         
-        # Restore unique fields
+        # Restore the essential, unique fields
         delivery_data[item_index]['ID in the Route'] = temp_id
         delivery_data[item_index]['Address'] = temp_address
         
+        # Apply the new success tag if it was in the copied data
+        if 'Success' in copied_data:
+            apply_success_tag(item, copied_data['Success'])
+        
         num_pasted += 1
         
+    # Refresh the input fields to show the pasted data (from the first selected item)
     if selected_items:
         first_item_index = tree.index(selected_items[0])
         populate_input_fields(delivery_data[first_item_index])
@@ -775,18 +951,24 @@ def paste_data():
     status_label.config(text=f"Data pasted to {num_pasted} row(s).")
     
 def create_input_widgets():
+    """Creates the input widgets based on field_map."""
     global input_widgets
     row_count = 0
     for field_name, details in field_map.items():
         field_frame = ttk.Frame(input_widgets_frame)
         field_frame.grid(row=row_count, column=0, sticky="ew", padx=5, pady=2)
-        label = ttk.Label(field_frame, text=field_name + ":", width=25)
+        label = ttk.Label(field_frame, text=field_name + ":", width=35)
         label.pack(side="left", padx=(0, 5))
         widget = None
+        
+        # Get a reference to the field name for passing to save_data
+        save_data_with_field = (lambda f=field_name: lambda *args: save_data(f))
+        
         if details.get("type") == "input":
             widget = ttk.Entry(field_frame)
             widget.pack(side="right", fill="x", expand=True)
-            widget.bind("<KeyRelease>", lambda event: save_data())
+            # Use KeyRelease for real-time saving/updating
+            widget.bind("<KeyRelease>", save_data_with_field(field_name)) 
         elif details.get("type") == "dropdown":
             scheme = COLOR_SCHEMES.get(field_name)
             if scheme:
@@ -794,73 +976,140 @@ def create_input_widgets():
                     field_frame,
                     options=details.get("options", []),
                     color_map=scheme,
-                    on_change=save_data
+                    # ColorDropdown calls on_change with no args, so we pass field name to its constructor
+                    on_change=save_data_with_field(field_name) 
                 )
                 widget.pack(side="right", fill="x", expand=True)
             else:
                 widget = ttk.Combobox(field_frame, values=details.get("options", []), state="readonly")
                 widget.pack(side="right", fill="x", expand=True)
-                widget.bind("<<ComboboxSelected>>", lambda event: save_data())
+                # Use ComboboxSelected for traditional ttk Combobox saving/updating
+                widget.bind("<<ComboboxSelected>>", save_data_with_field(field_name))
+                
         input_widgets[field_name] = widget
         row_count += 1
         
-def fetch_and_display_street_view(address):
-    """Fetches and displays a Street View image for a given address."""
-    global street_view_image_label, current_street_view_url # <-- ADDED current_street_view_url
-    
-    # Reset URL
-    current_street_view_url = ""
+def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=True):
+    """
+    Fetches and displays a Street View image. If heading is None, relies on the API's default.
+    MODIFIED: Status message now indicates if the image was loaded from the cache.
+    """
+    global street_view_image_label, current_street_view_url, current_heading
     
     if not google_api_key or google_api_key == "YOUR_API_KEY_HERE":
-        # Do not show error if the Google Maps key is the placeholder
+        status_label.config(text="Error: Please set your actual Google Maps Street View API Key.", foreground="red")
         return
         
-    # Construct the link to the actual Google Maps Street View/Map page
-    # This URL works for opening the full interactive map view centered at the address
-    current_street_view_url = f"https://www.google.com/maps/search/?api=1&query={requests.utils.quote(address)}" # <-- STORED THE URL
+    current_street_view_url = f"https://www.google.com/maps/search/?api=1&query={requests.utils.quote(address)}"
     
-    if address in image_cache:
-        img_tk = image_cache[address]
-        street_view_image_label.configure(image=img_tk)
-        street_view_image_label.image = img_tk
-        status_label.config(text=f"Loaded image from cache for '{address}'. Click image to open in browser.")
-        return
-    status_label.config(text=f"Fetching image for '{address}'...")
+    # 1. Determine size for display (max size to request from API for quality)
+    max_request_width = 1000
+    max_request_height = 800
     
-    # URL for the static Street View Image API (used for the display image)
-    url = "https://maps.googleapis.com/maps/api/streetview"
+    # Get the actual size of the display label for resizing the final image
+    root.update_idletasks()
+    try:
+        display_width = street_view_image_label.winfo_width()
+        display_height = street_view_image_label.winfo_height()
+        if display_width < 100 or display_height < 100: 
+             display_width, display_height = 400, 300 # Fallback 
+    except Exception:
+        display_width, display_height = 400, 300 # Fallback 
+        
+    # 2. Prepare parameters
     params = {
         "key": google_api_key,
-        "size": "400x300",
+        "size": f"{max_request_width}x{max_request_height}",
         "location": address,
-        "fov": 90,
+        "fov": int(fov),
         "pitch": 0,
     }
+    
+    # 3. Cache key (includes max requested size for uniqueness)
+    if heading is not None:
+        params["heading"] = int(heading)
+        cache_key = f"{address}_{heading:.2f}_{fov}_{max_request_width}x{max_request_height}" 
+    else:
+        # Note: When heading is None, the actual heading determined by the API must be stored
+        # This cache key assumes the API returns a consistent default *for a given location*.
+        cache_key = f"{address}_default_{fov}_{max_request_width}x{max_request_height}" 
+        
+    # 4. Check cache
+    if cache_result and cache_key in image_cache:
+        img_tk_cached = image_cache[cache_key]['tk_img']
+        
+        if image_cache[cache_key]['width'] == display_width and image_cache[cache_key]['height'] == display_height:
+            street_view_image_label.configure(image=img_tk_cached)
+            street_view_image_label.image = img_tk_cached
+            
+            # --- MODIFIED STATUS MESSAGE FOR CACHE HIT ---
+            status_label.config(text=f"Image loaded from cache. (FOV: {fov}). Click image to open in browser.", foreground="green")
+            # ---------------------------------------------
+            return
+
+    # Status message before API call
+    status_label.config(text=f"Fetching image from API for '{address}' (FOV: {fov})...", foreground="blue")
+    
+    # 5. Fetch image
+    url = "https://maps.googleapis.com/maps/api/streetview"
     try:
         response = requests.get(url, params=params)
         response.raise_for_status()
         
+        # 6. Extract the heading from the response headers if not provided
+        if heading is None:
+            header_content = response.headers.get('X-Google-Imagery-Content-Type', '')
+            if 'heading=' in header_content:
+                try:
+                    start = header_content.index('heading=') + 8
+                    end = header_content.index(',', start)
+                    auto_heading = float(header_content[start:end])
+                    current_heading = auto_heading
+                except Exception:
+                    current_heading = 0 
+            else:
+                 current_heading = 0
+
         image_data = response.content
         img_pil = Image.open(io.BytesIO(image_data))
-        img_tk = ImageTk.PhotoImage(img_pil)
-        street_view_image_label.configure(image=img_tk)
-        street_view_image_label.image = img_tk
         
-        image_cache[address] = img_tk
+        # 7. Resize image to fit the label area (preserving aspect ratio)
+        img_width, img_height = img_pil.size
         
-        status_label.config(text=f"Image fetched for '{address}'. Click image to open in browser.") # <-- UPDATED STATUS
-    except requests.exceptions.HTTPError as e:
-        status_label.config(text=f"API Error: {e.response.text}")
-    except Exception as e:
-        status_label.config(text=f"An error occurred fetching image: {e}")
+        # Calculate fit size
+        ratio = min(display_width / img_width, display_height / img_height)
+        new_width = int(img_width * ratio)
+        new_height = int(img_height * ratio)
 
-# NEW FUNCTION TO OPEN BROWSER
+        img_pil = img_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        img_tk = ImageTk.PhotoImage(img_pil)
+        
+        street_view_image_label.configure(image=img_tk)
+        street_view_image_label.image = img_tk # Keep a reference
+        
+        if cache_result:
+             image_cache[cache_key] = {
+                 'tk_img': img_tk, 
+                 'width': new_width, 
+                 'height': new_height
+             }
+        
+        # --- MODIFIED STATUS MESSAGE FOR API FETCH ---
+        status_label.config(text=f"Image fetched (API Call). (H: {int(current_heading)}°, FOV: {fov}). Click image to open in browser.", foreground="black")
+        # ---------------------------------------------
+        
+    except requests.exceptions.HTTPError as e:
+        status_label.config(text=f"API Error: {e.response.text}", foreground="red")
+    except Exception as e:
+        status_label.config(text=f"An error occurred fetching image: {e}", foreground="red")
+
 def open_browser_link(event):
     """Opens the globally stored Street View URL in the default web browser."""
     global current_street_view_url
     if current_street_view_url:
         try:
-            webbrowser.open(current_street_view_url, new=2)  # new=2 opens in a new tab if possible
+            webbrowser.open(current_street_view_url, new=2)
             status_label.config(text="Opened Street View link in browser.", foreground="blue")
         except Exception as e:
             status_label.config(text=f"Error opening browser: {e}", foreground="red")
@@ -868,31 +1117,45 @@ def open_browser_link(event):
         status_label.config(text="No valid Street View URL to open.", foreground="red")
 
 
-# --- GUI Setup ---
+# -------------------------------------------------------------------
+# GUI Setup
+# -------------------------------------------------------------------
 root = tk.Tk()
 root.title("Robot Delivery Tracker")
 root.geometry("900x650")
 
 style = ttk.Style()
-style.configure("Treeview", rowheight=30)
 style.configure("TEntry", font=("TkDefaultFont", 12))
 style.configure("TCombobox", font=("TkDefaultFont", 12))
 
-# Use grid for a more precise, flexible layout
-root.grid_columnconfigure(0, weight=1)
-root.grid_columnconfigure(1, weight=1)
-root.grid_rowconfigure(0, weight=1)
+# --- Treeview Selection Override (Kept here as it is a style.map call on the Toplevel style) ---
+style.map('Treeview',
+    foreground=[('selected', 'white')],
+    background=[('selected', 'blue')] 
+)
+style.configure("Treeview", rowheight=30) 
+# ------------------------------------------------------
 
-# Left Frame for the list and controls
-left_frame = ttk.Frame(root, padding="10")
-left_frame.grid(row=0, column=0, sticky="nsew")
-left_frame.grid_columnconfigure(0, weight=1)
-left_frame.grid_rowconfigure(1, weight=1)
+main_paned_window = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
+main_paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-control_frame = ttk.Frame(left_frame)
+left_pane = ttk.Frame(main_paned_window, padding="0 0 10 0") 
+left_pane.grid_columnconfigure(0, weight=1)
+left_pane.grid_rowconfigure(1, weight=1)
+
+right_pane = ttk.Frame(main_paned_window, padding="10 0 0 0") 
+right_pane.grid_columnconfigure(0, weight=1)
+right_pane.grid_rowconfigure(0, weight=0) 
+right_pane.grid_rowconfigure(1, weight=100) 
+
+main_paned_window.add(left_pane, weight=1)
+main_paned_window.add(right_pane, weight=1)
+
+# --- LEFT PANE (Controls and Treeview) ---
+control_frame = ttk.Frame(left_pane)
 control_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
 
-choose_button = ttk.Button(control_frame, text="Choose CSV File", command=choose_csv_file)
+choose_button = ttk.Button(control_frame, text="Load Data", command=choose_csv_file)
 choose_button.pack(side=tk.LEFT)
 
 export_button = ttk.Button(control_frame, text="Export CSV", command=export_csv_file)
@@ -911,37 +1174,54 @@ status_label = ttk.Label(control_frame, text="Select a CSV file to get started."
 status_label.pack(side=tk.LEFT, padx=(10, 0))
 
 columns = ("ID in the Route", "Address")
-tree = ttk.Treeview(left_frame, columns=columns, show="headings")
+tree = ttk.Treeview(left_pane, columns=columns, show="headings")
 tree.heading("ID in the Route", text="ID in the Route")
 tree.heading("Address", text="Address")
 tree.column("ID in the Route", width=120, anchor=tk.CENTER)
 tree.column("Address", width=300)
 tree.grid(row=1, column=0, sticky="nsew")
 
-scrollbar = ttk.Scrollbar(left_frame, orient=tk.VERTICAL, command=tree.yview)
+# --- FIXED: Tag configuration is now called on the tree widget itself ---
+tree.tag_configure('Success-Yes', background=GREEN, foreground=FG_ON) 
+tree.tag_configure('Success-No', background=RED, foreground=FG_ON)
+tree.tag_configure('Success-Skipped', background=YELLOW, foreground=FG_OFF)
+tree.tag_configure('Success-Missing', background=LGRAY, foreground=FG_OFF)
+tree.tag_configure('Success-None', background='#ffffff', foreground=FG_OFF) # Default white
+# ------------------------------------------------------------------------
+
+scrollbar = ttk.Scrollbar(left_pane, orient=tk.VERTICAL, command=tree.yview)
 tree.configure(yscrollcommand=scrollbar.set)
 scrollbar.grid(row=1, column=1, sticky="ns")
 
 tree.bind("<<TreeviewSelect>>", on_tree_select)
 
-# Right Frame for inputs and image
-right_frame = ttk.Frame(root, padding="10")
-right_frame.grid(row=0, column=1, sticky="nsew")
-right_frame.grid_columnconfigure(0, weight=1)
-right_frame.grid_rowconfigure(0, weight=1)
-right_frame.grid_rowconfigure(1, weight=1)
-
-input_widgets_frame = ttk.Frame(right_frame)
+# --- RIGHT PANE (Inputs and Image) ---
+input_widgets_frame = ttk.Frame(right_pane)
 input_widgets_frame.grid(row=0, column=0, sticky="nsew")
 create_input_widgets()
 
-street_view_image_frame = ttk.Frame(right_frame, padding=5)
+street_view_image_frame = ttk.Frame(right_pane, padding=5)
 street_view_image_frame.grid(row=1, column=0, sticky="nsew")
+street_view_image_frame.grid_columnconfigure(0, weight=1)
+street_view_image_frame.grid_rowconfigure(0, weight=1)
 
-street_view_image_label = ttk.Label(street_view_image_frame, text="Street View Preview", background="gray", cursor="hand2") # <-- ADDED cursor="hand2"
-street_view_image_label.pack(fill=tk.BOTH, expand=True)
+street_view_image_label = ttk.Label(street_view_image_frame, text="Street View Preview\n\nScroll to Zoom | Right Click to Pan", background="gray", cursor="hand2")
+street_view_image_label.grid(row=0, column=0, sticky="nsew")
 
-# BIND THE CLICK EVENT TO THE NEW FUNCTION
-street_view_image_label.bind("<Button-1>", open_browser_link) # <-- ADDED THIS BINDING
+street_view_image_label.bind("<Button-1>", open_browser_link)
+street_view_image_label.bind("<Button-4>", zoom_image)
+street_view_image_label.bind("<Button-5>", zoom_image)
+street_view_image_label.bind("<MouseWheel>", zoom_image)
+street_view_image_label.bind("<Button-3>", start_pan)
+street_view_image_label.bind("<B3-Motion>", do_pan)
+street_view_image_label.bind("<ButtonRelease-3>", stop_pan)
+
+# BIND an event to ensure the map redraws when the window is resized
+def resize_handler(event):
+    if current_address_for_image and event.widget == street_view_image_label:
+        fetch_and_display_street_view(current_address_for_image, current_heading, current_fov, cache_result=False)
+
+street_view_image_label.bind("<Configure>", resize_handler)
+
 
 root.mainloop()
