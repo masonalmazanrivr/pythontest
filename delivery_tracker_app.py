@@ -18,7 +18,7 @@ import math
 delivery_data = []
 selected_row_id = None
 input_widgets = {}
-summary_inputs = {}
+summary_inputs = {} 
 copied_data = {} 
 current_street_view_url = "" 
 image_cache = {}
@@ -34,7 +34,7 @@ last_mouse_x = 0
 google_api_key = "AIzaSyBKE225e5Eq4tEyAPqJXO_Hd5grSeoYcqc" # Google Maps Street View API Key
 GEMINI_API_KEY = "AIzaSyCDcp2WtRkpsuUsr3b3rTN_mkErQXsdv1I" # Gemini API Key for image processing
 
-# Field definitions (truncated for brevity)
+# Field definitions
 field_map = {
     "Date": {"type": "input"},
     "Function": {"type": "dropdown", "options": ["Commercial", "R&D/Testing"]},
@@ -56,7 +56,7 @@ field_map = {
     "Operator Comments": {"type": "input"},
 }
 
-# ---------- Color schemes (truncated for brevity) ----------
+# ---------- Color schemes ----------
 GREEN = "#1f7a3f"
 RED = "#a31212"
 YELLOW = "#f1d48a"
@@ -125,25 +125,132 @@ COLOR_SCHEMES = {
     },
 }
 
+# -------------------------------------------------------------------
+# Focus and Navigation Logic
+# -------------------------------------------------------------------
+
+def focus_next_widget(event):
+    """Moves focus to the next/previous widget in the defined order, handling Up/Down arrows."""
+    widgets = list(input_widgets.values())
+    try:
+        # Determine the currently focused widget (or its container)
+        focused = root.focus_get()
+        current_widget = None
+        
+        if focused in widgets:
+            current_widget = focused
+        elif isinstance(focused, tk.Label) and focused.master in widgets:
+            current_widget = focused.master
+        elif isinstance(focused, tk.Text):
+            # For Text widgets, their parent (which is a Frame container) is in widgets
+            current_widget = focused.master.master
+        
+        if not current_widget:
+            return 
+            
+        current_index = widgets.index(current_widget)
+        
+    except ValueError:
+        return 
+
+    next_index = current_index
+    if event.keysym in ('Down', 'Tab'):
+        next_index = (current_index + 1) % len(widgets)
+    elif event.keysym == 'Up': 
+        next_index = (current_index - 1 + len(widgets)) % len(widgets)
+        
+    # Set focus to the new widget
+    next_widget = widgets[next_index]
+    
+    if isinstance(next_widget, ColorDropdown):
+        next_widget.label.focus_set()
+    elif isinstance(next_widget, tk.Text):
+        next_widget.focus_set()
+    elif isinstance(next_widget, (ttk.Entry, ttk.Combobox)):
+        next_widget.focus_set()
+        
+    return "break" # Prevent default Tkinter focus behavior (especially for Up/Down)
+    
+def apply_focus_style(event, is_focus_in):
+    """Applies a visual indicator on focus in/out to the field frame."""
+    widget = event.widget
+    
+    # Find the field_frame (the ttk.Frame created in create_input_widgets)
+    if isinstance(widget, tk.Label): # ColorDropdown label
+        container_frame = widget.master.master
+    elif isinstance(widget, tk.Text): # Text widget
+        container_frame = widget.master.master
+    else: # Entry or Combobox
+        container_frame = widget.master
+
+    if is_focus_in:
+        container_frame.config(highlightbackground="blue", highlightcolor="blue", highlightthickness=2)
+    else:
+        container_frame.config(highlightthickness=0)
+
+# -------------------------------------------------------------------
+# Treeview Tag Helper Functions
+# -------------------------------------------------------------------
+
+def get_tag_from_success_value(success_value: str) -> str:
+    """Maps the Success field value to a Treeview tag name."""
+    tag_map = {
+        "Yes": 'Success-Yes',
+        "No": 'Success-No',
+        "Skipped by robot": 'Success-Skipped',
+        "Missing": 'Success-Missing',
+        "": 'Success-None'
+    }
+    return tag_map.get(success_value, 'Success-None')
+
+def apply_success_tag(item_id, success_value):
+    """Removes all success-related tags and applies the new one."""
+    current_tags = tree.item(item_id, 'tags')
+    # Remove old success tags
+    new_tags = [t for t in current_tags if not t.startswith('Success-')]
+    
+    # Add new tag
+    new_tag = get_tag_from_success_value(success_value)
+    if new_tag not in new_tags:
+        new_tags.append(new_tag)
+        
+    tree.item(item_id, tags=tuple(new_tags))
+
 # ---------- Colorized dropdown widget (toggle + click-away) ----------
 class ColorDropdown(tk.Frame):
-    """Colored dropdown using an overrideredirect Toplevel menu."""
+    """Colored dropdown using an overrideredirect Toplevel menu, now with keyboard navigation."""
     EMPTY_VALUE = "" 
     
     def __init__(self, parent, options, color_map, on_change=None):
-        super().__init__(parent)
+        # FIX APPLIED HERE: highlightthickness is set on the container Frame.
+        super().__init__(parent, highlightthickness=0) 
         self.options = options
+        self.all_options = [self.EMPTY_VALUE] + options # Including Clear option for keyboard
         self.color_map = color_map
         self.on_change = on_change
         self.value = self.EMPTY_VALUE
         self.dropdown = None
+        
+        # FIX APPLIED HERE: Removed unsupported 'tabindex=0'
         self.label = tk.Label(self, text="", bd=1, relief="solid", padx=8, pady=4, cursor="hand2")
+        
         self.label.pack(fill="x", expand=True)
+        
+        # --- KEYBOARD BINDINGS ON LABEL ---
         self.label.bind("<Button-1>", self._on_label_click)
+        self.label.bind("<FocusIn>", lambda e: apply_focus_style(e, True))
+        self.label.bind("<FocusOut>", lambda e: apply_focus_style(e, False))
         self.label.bind("<space>", self._on_label_key)
         self.label.bind("<Return>", self._on_label_key)
-        self.winfo_toplevel().bind("<ButtonRelease-1>", self._on_root_click, add="+")
+        self.label.bind("<Up>", focus_next_widget)
+        self.label.bind("<Down>", focus_next_widget)
+        self.label.bind("<Tab>", focus_next_widget)
+        self.label.bind("<Shift-Tab>", focus_next_widget)
+        # --------------------------------------
         
+        self.winfo_toplevel().bind("<ButtonRelease-1>", self._on_root_click, add="+")
+        self.selected_menu_index = -1 # Index in self.all_options
+
     def _on_label_click(self, _e):
         self._open_menu()
         return "break"
@@ -171,6 +278,16 @@ class ColorDropdown(tk.Frame):
         self.dropdown.bind("<Escape>", lambda e: self._close_menu())
         self.dropdown.focus_set()
         
+        # --- Menu Navigation Logic ---
+        self.dropdown.bind("<Down>", self._navigate_menu)
+        self.dropdown.bind("<Up>", self._navigate_menu)
+        self.dropdown.bind("<Return>", self._select_via_keyboard)
+        self.dropdown.bind("<space>", self._select_via_keyboard)
+        # -----------------------------
+        
+        # Store menu item widgets (labels) for keyboard navigation
+        self.menu_items = []
+        
         # --- Add the CLEAR/RESET option ---
         reset_val = self.EMPTY_VALUE
         reset_item = tk.Label(
@@ -183,22 +300,71 @@ class ColorDropdown(tk.Frame):
             font=("TkDefaultFont", 10, "italic")
         )
         reset_item.pack(fill="x")
-        reset_item.bind("<Enter>", lambda e, w=reset_item: w.configure(relief="solid", bd=1))
-        reset_item.bind("<Leave>", lambda e, w=reset_item: w.configure(relief="flat", bd=0))
+        self.menu_items.append(reset_item)
+        reset_item.bind("<Enter>", lambda e, w=reset_item: self._highlight_item(w))
+        reset_item.bind("<Leave>", lambda e, w=reset_item: self._unhighlight_item(w))
         reset_item.bind("<Button-1>", lambda e, val=reset_val: self._select(val))
         
         # Separator
         ttk.Separator(self.dropdown, orient=tk.HORIZONTAL).pack(fill='x', pady=2)
-        # --- END NEW ---
         
         # Items (existing options)
         for opt in self.options:
             bg, fg = self.color_map.get(opt, ("#f0f0f0", "#000"))
             item = tk.Label(self.dropdown, text=opt, bg=bg, fg=fg, padx=10, pady=6)
             item.pack(fill="x")
-            item.bind("<Enter>", lambda e, w=item: w.configure(relief="solid", bd=1))
-            item.bind("<Leave>", lambda e, w=item: w.configure(relief="flat", bd=0))
+            self.menu_items.append(item)
+            item.bind("<Enter>", lambda e, w=item: self._highlight_item(w))
+            item.bind("<Leave>", lambda e, w=item: self._unhighlight_item(w))
             item.bind("<Button-1>", lambda e, val=opt: self._select(val))
+
+        # Initialize keyboard selection index
+        try:
+            current_value_index = self.all_options.index(self.value)
+        except ValueError:
+            current_value_index = 0 # Default to 'Clear Selection'
+            
+        self.selected_menu_index = current_value_index
+        if self.menu_items:
+             self._highlight_item(self.menu_items[self.selected_menu_index], keyboard=True)
+             
+    def _highlight_item(self, widget, keyboard=False):
+        """Highlights a menu item (for both mouse and keyboard)."""
+        if not keyboard:
+             # Find index if highlighting via mouse
+             try:
+                 self._unhighlight_item(self.menu_items[self.selected_menu_index])
+                 self.selected_menu_index = self.menu_items.index(widget)
+             except:
+                 pass
+                 
+        widget.configure(relief="solid", bd=1)
+        
+    def _unhighlight_item(self, widget):
+        """Removes the highlight from a menu item."""
+        widget.configure(relief="flat", bd=0)
+
+    def _navigate_menu(self, event):
+        """Handles Up/Down arrow key navigation in the menu."""
+        if not self.menu_items:
+            return "break"
+        
+        self._unhighlight_item(self.menu_items[self.selected_menu_index])
+        
+        if event.keysym == 'Down':
+            self.selected_menu_index = (self.selected_menu_index + 1) % len(self.menu_items)
+        elif event.keysym == 'Up':
+            self.selected_menu_index = (self.selected_menu_index - 1 + len(self.menu_items)) % len(self.menu_items)
+            
+        self._highlight_item(self.menu_items[self.selected_menu_index], keyboard=True)
+        return "break"
+        
+    def _select_via_keyboard(self, event):
+        """Selects the highlighted item when Enter is pressed."""
+        if self.selected_menu_index >= 0 and self.selected_menu_index < len(self.all_options):
+            selected_value = self.all_options[self.selected_menu_index]
+            self._select(selected_value)
+        return "break"
             
     def _close_menu(self):
         if self.dropdown and self.dropdown.winfo_exists():
@@ -207,6 +373,7 @@ class ColorDropdown(tk.Frame):
             except Exception:
                 pass
         self.dropdown = None
+        self.label.focus_set() # Return focus to the main dropdown label
         
     def _on_root_click(self, event):
         if not (self.dropdown and self.dropdown.winfo_exists()):
@@ -249,34 +416,6 @@ class ColorDropdown(tk.Frame):
         
     def get(self) -> str:
         return self.value
-
-# -------------------------------------------------------------------
-# Treeview Tag Helper Functions
-# -------------------------------------------------------------------
-
-def get_tag_from_success_value(success_value: str) -> str:
-    """Maps the Success field value to a Treeview tag name."""
-    tag_map = {
-        "Yes": 'Success-Yes',
-        "No": 'Success-No',
-        "Skipped by robot": 'Success-Skipped',
-        "Missing": 'Success-Missing',
-        "": 'Success-None'
-    }
-    return tag_map.get(success_value, 'Success-None')
-
-def apply_success_tag(item_id, success_value):
-    """Removes all success-related tags and applies the new one."""
-    current_tags = tree.item(item_id, 'tags')
-    # Remove old success tags
-    new_tags = [t for t in current_tags if not t.startswith('Success-')]
-    
-    # Add new tag
-    new_tag = get_tag_from_success_value(success_value)
-    if new_tag not in new_tags:
-        new_tags.append(new_tag)
-        
-    tree.item(item_id, tags=tuple(new_tags))
 
 # -------------------------------------------------------------------
 # Core Application Functions
@@ -492,7 +631,6 @@ def show_confirmation_popup(filepath=None, is_image_mode=False):
 def start_data_load(source, date, robot_id, is_content=False):
     """
     Loads data into the application.
-    MODIFIED: Now applies the success tag to the Treeview item on load.
     """
     global delivery_data
     delivery_data = []
@@ -666,11 +804,13 @@ def populate_input_fields(data):
             widget.insert(0, value)
         elif isinstance(widget, ColorDropdown):
             widget.set(value if value else ColorDropdown.EMPTY_VALUE)
+        elif isinstance(widget, tk.Text):
+            widget.delete('1.0', tk.END)
+            widget.insert('1.0', value)
             
 def save_data(field_name_changed=None):
     """
     Saves data from input fields to all currently selected rows in delivery_data.
-    MODIFIED: Now updates the Treeview tag if the "Success" field is changed.
     """
     global selected_row_id
     selected_items = tree.selection()
@@ -695,13 +835,17 @@ def save_data(field_name_changed=None):
             update_data[field_name_changed] = widget.get()
         elif isinstance(widget, ttk.Combobox):
             update_data[field_name_changed] = widget.get()
+        elif isinstance(widget, tk.Text):
+            update_data[field_name_changed] = widget.get('1.0', tk.END).strip()
             
     else:
         # SINGLE UPDATE MODE: Only update the first selected row (e.g., Entry keypress)
         focused_widget = root.focus_get()
         
+        # This fallback is primarily for Enter/Entry keypresses where the widget is not a dropdown
         for name, widget in input_widgets.items():
-            if widget is focused_widget or widget.winfo_children() and focused_widget in widget.winfo_children():
+            # Check if the focused widget is the main widget or a child label of ColorDropdown
+            if widget is focused_widget or (isinstance(widget, ColorDropdown) and widget.label is focused_widget):
                  current_field_name = name
                  break
                  
@@ -709,7 +853,8 @@ def save_data(field_name_changed=None):
             widget = input_widgets.get(current_field_name)
             if isinstance(widget, ttk.Entry):
                 update_data[current_field_name] = widget.get()
-            # Dropdowns are handled by the 'field_name_changed' path
+            elif isinstance(widget, tk.Text):
+                update_data[current_field_name] = widget.get('1.0', tk.END).strip()
         else:
              # Fallback to update everything for the *first* selected item if the focus isn't clear
              first_selected_index = tree.index(selected_items[0])
@@ -720,6 +865,8 @@ def save_data(field_name_changed=None):
                     delivery_data[first_selected_index][key] = widget.get()
                 elif isinstance(widget, ColorDropdown):
                     delivery_data[first_selected_index][key] = widget.get()
+                elif isinstance(widget, tk.Text):
+                    delivery_data[first_selected_index][key] = widget.get('1.0', tk.END).strip()
              return
 
 
@@ -764,11 +911,31 @@ def export_csv_file():
             status_label.config(text=f"Report saved to '{filepath.split('/')[-1]}'")
         except Exception as e:
             status_label.config(text=f"An error occurred while exporting: {e}")
-            
+
+# --- Helper function for adding the Operator Comments text area ---
+def add_comment_text_area(parent, row_idx, label_text):
+    """Creates a label and an expanding Text widget with a scrollbar."""
+    ttk.Label(parent, text=label_text, font=("TkDefaultFont", 10, "bold")).grid(row=row_idx, column=0, sticky="w", padx=5, pady=(5, 2))
+    
+    # Container for Text widget and Scrollbar
+    text_container = ttk.Frame(parent)
+    text_container.grid(row=row_idx + 1, column=0, columnspan=2, sticky="nsew", padx=5)
+    text_container.grid_columnconfigure(0, weight=1) 
+    text_container.grid_rowconfigure(0, weight=1) 
+    
+    text_widget = tk.Text(text_container, height=5, width=40, wrap=tk.WORD, bd=1, relief="solid")
+    text_widget.grid(row=0, column=0, sticky="nsew")
+    
+    scrollbar = ttk.Scrollbar(text_container, command=text_widget.yview)
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    text_widget.config(yscrollcommand=scrollbar.set)
+    
+    return text_widget
+# ------------------------------------------------------------------
+
 def show_data_summary():
     """
     Generates a summary report popup based on the aggregated data.
-    FIXED: Calculates 'Intended # of Robot Deliveries' to only count stops explicitly marked 'Yes' or 'No'.
     """
     if not delivery_data:
         status_label.config(text="No data to summarize. Please load a CSV first.")
@@ -792,7 +959,7 @@ def show_data_summary():
     for row in delivery_data:
         success_status = row.get("Success")
         
-        # --- FIX APPLIED HERE: Only count stops with definite Yes or No status ---
+        # --- Only count stops with definite Yes or No status ---
         if success_status in ["Yes", "No"]:
             intended_robot_deliveries += 1
             
@@ -824,8 +991,30 @@ def show_data_summary():
     popup.title("Real-World Deliveries Summary")
     popup.transient(root)
     popup.focus_set()
+    
+    # Configure popup grid to allow the main summary frame to expand
+    popup.grid_columnconfigure(0, weight=1)
+    popup.grid_rowconfigure(0, weight=1) 
+    
     summary_frame = ttk.Frame(popup, padding=10)
-    summary_frame.pack(fill=tk.BOTH, expand=True)
+    summary_frame.grid(row=0, column=0, sticky="nsew") 
+    
+    # Configure summary_frame to allow the comments section to expand vertically
+    summary_frame.grid_columnconfigure(0, weight=1)
+    summary_frame.grid_rowconfigure(1, weight=1) # Row 1 will contain the expandable comments frame
+    
+    # Inner frame for the statistical labels and single-line entries (non-expanding)
+    stats_frame = ttk.Frame(summary_frame)
+    stats_frame.grid(row=0, column=0, sticky="ew")
+    stats_frame.grid_columnconfigure(0, weight=1)
+    stats_frame.grid_columnconfigure(1, weight=1)
+
+    # Frame for the comments text area and close button (expandable)
+    comments_frame = ttk.Frame(summary_frame)
+    comments_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+    comments_frame.grid_columnconfigure(0, weight=1)
+    comments_frame.grid_columnconfigure(1, weight=0)
+    comments_frame.grid_rowconfigure(1, weight=1) # Make the Text widget row expandable
     
     def add_label_row(parent, row_idx, label_text, value_text):
         ttk.Label(parent, text=label_text, font=("TkDefaultFont", 10, "bold")).grid(row=row_idx, column=0, sticky="w", padx=5, pady=2)
@@ -840,64 +1029,68 @@ def show_data_summary():
         
     first_row = delivery_data[0]
     current_row = 0
-    add_label_row(summary_frame, current_row, "Real-World Deliveries in Austin 🇺🇸", "")
+    
+    # Populate all statistical and single-line entry rows in stats_frame
+    add_label_row(stats_frame, current_row, "Real-World Deliveries in Austin 🇺🇸", "")
     current_row += 1
-    add_label_row(summary_frame, current_row, "Date:", first_row.get("Date", ""))
+    add_label_row(stats_frame, current_row, "Date:", first_row.get("Date", ""))
     current_row += 1
-    add_label_row(summary_frame, current_row, "Country:", "USA")
+    add_label_row(stats_frame, current_row, "Country:", "USA")
     current_row += 1
-    add_label_row(summary_frame, current_row, "City:", "Austin")
+    add_label_row(stats_frame, current_row, "City:", "Austin")
     current_row += 1
     
-    add_entry_row(summary_frame, current_row, "Area:", "Terry Town, Allendale, Crest View, West...")
+    summary_inputs["Area"] = add_entry_row(stats_frame, current_row, "Area:", "Terry Town, Allendale, Crest View, West...")
     current_row += 1
-    add_label_row(summary_frame, current_row, "Robot ID:", first_row.get("Robot ID", ""))
+    add_label_row(stats_frame, current_row, "Robot ID:", first_row.get("Robot ID", ""))
     current_row += 1
-    add_label_row(summary_frame, current_row, "Total # of Deliveries:", str(total_deliveries))
-    current_row += 1
-    
-    # --- MODIFIED: Calculated and displayed as a label ---
-    add_label_row(summary_frame, current_row, "Intended # of Robot Deliveries:", str(intended_robot_deliveries))
-    current_row += 1
-    # ----------------------------------------------------
-    
-    add_label_row(summary_frame, current_row, "# of Robot Deliveries:", str(robot_deliveries))
-    current_row += 1
-    add_label_row(summary_frame, current_row, "# of Autonomous Returns:", str(autonomous_returns))
+    add_label_row(stats_frame, current_row, "Total # of Deliveries:", str(total_deliveries))
     current_row += 1
     
-    add_entry_row(summary_frame, current_row, "Revenue:", "")
-    current_row += 1
-    add_label_row(summary_frame, current_row, "Customer:", "Veho")
-    current_row += 1
-    add_entry_row(summary_frame, current_row, "Shift Duration:", "")
-    current_row += 1
-    add_entry_row(summary_frame, current_row, "Planned Shift Duration:", "")
+    add_label_row(stats_frame, current_row, "Intended # of Robot Deliveries:", str(intended_robot_deliveries))
     current_row += 1
     
-    add_label_row(summary_frame, current_row, "# of Soft Interventions:", str(soft_interventions))
+    add_label_row(stats_frame, current_row, "# of Robot Deliveries:", str(robot_deliveries))
     current_row += 1
-    add_label_row(summary_frame, current_row, "# of Physical Interventions:", str(physical_interventions))
-    current_row += 1
-    add_label_row(summary_frame, current_row, "# of Autonomy Interventions:", "0")
-    current_row += 1
-    add_label_row(summary_frame, current_row, "# of Misplaced Orders:", str(misplaced_orders))
-    current_row += 1
-    add_label_row(summary_frame, current_row, "# of Bad-Health Interventions:", str(bad_health_interventions))
-    current_row += 1
-    add_label_row(summary_frame, current_row, "Number of Connectivity Interventions:", str(connectivity_interventions))
-    current_row += 1
-    add_label_row(summary_frame, current_row, "# of Cluttered Pathways:", str(cluttered_pathways))
-    current_row += 1
-    add_label_row(summary_frame, current_row, "# of Gates or Doors:", str(gates_or_doors))
-    current_row += 1
-    add_label_row(summary_frame, current_row, "# of Missing Payload Functionalities:", str(missing_payload_functionalities))
-    current_row += 1
-    add_label_row(summary_frame, current_row, "# of Too-Risky Paths:", str(too_risky_paths))
+    add_label_row(stats_frame, current_row, "# of Autonomous Returns:", str(autonomous_returns))
     current_row += 1
     
-    close_button = ttk.Button(summary_frame, text="Close", command=popup.destroy)
-    close_button.grid(row=current_row, column=0, columnspan=2, pady=10)
+    summary_inputs["Revenue"] = add_entry_row(stats_frame, current_row, "Revenue:", "")
+    current_row += 1
+    add_label_row(stats_frame, current_row, "Customer:", "Veho")
+    current_row += 1
+    summary_inputs["Shift Duration"] = add_entry_row(stats_frame, current_row, "Shift Duration:", "")
+    current_row += 1
+    summary_inputs["Planned Shift Duration"] = add_entry_row(stats_frame, current_row, "Planned Shift Duration:", "")
+    current_row += 1
+    
+    add_label_row(stats_frame, current_row, "# of Soft Interventions:", str(soft_interventions))
+    current_row += 1
+    add_label_row(stats_frame, current_row, "# of Physical Interventions:", str(physical_interventions))
+    current_row += 1
+    add_label_row(stats_frame, current_row, "# of Autonomy Interventions:", "0")
+    current_row += 1
+    add_label_row(stats_frame, current_row, "# of Misplaced Orders:", str(misplaced_orders))
+    current_row += 1
+    add_label_row(stats_frame, current_row, "# of Bad-Health Interventions:", str(bad_health_interventions))
+    current_row += 1
+    add_label_row(stats_frame, current_row, "Number of Connectivity Interventions:", str(connectivity_interventions))
+    current_row += 1
+    add_label_row(stats_frame, current_row, "# of Cluttered Pathways:", str(cluttered_pathways))
+    current_row += 1
+    add_label_row(stats_frame, current_row, "# of Gates or Doors:", str(gates_or_doors))
+    current_row += 1
+    add_label_row(stats_frame, current_row, "# of Missing Payload Functionalities:", str(missing_payload_functionalities))
+    current_row += 1
+    add_label_row(stats_frame, current_row, "# of Too-Risky Paths:", str(too_risky_paths))
+    
+    # --- ADD THE OPERATOR COMMENTS TEXT AREA TO comments_frame ---
+    comments_text_widget = add_comment_text_area(comments_frame, 0, "Operator Comments:") 
+    summary_inputs["Operator Comments"] = comments_text_widget
+    
+    close_button = ttk.Button(comments_frame, text="Close", command=popup.destroy)
+    close_button.grid(row=2, column=0, columnspan=2, pady=10) 
+
 
 def copy_data():
     """Copies data from the currently selected row to the clipboard."""
@@ -951,24 +1144,58 @@ def paste_data():
     status_label.config(text=f"Data pasted to {num_pasted} row(s).")
     
 def create_input_widgets():
-    """Creates the input widgets based on field_map."""
+    """
+    Creates the input widgets based on field_map.
+    MODIFIED: Added focus bindings (Up/Down/Tab) to all input widgets.
+    """
     global input_widgets
     row_count = 0
+    
     for field_name, details in field_map.items():
-        field_frame = ttk.Frame(input_widgets_frame)
+        # Create an outer frame to hold the focus highlight
+        field_frame = ttk.Frame(input_widgets_frame, style="TFrame")
         field_frame.grid(row=row_count, column=0, sticky="ew", padx=5, pady=2)
+        
         label = ttk.Label(field_frame, text=field_name + ":", width=35)
         label.pack(side="left", padx=(0, 5))
         widget = None
         
-        # Get a reference to the field name for passing to save_data
         save_data_with_field = (lambda f=field_name: lambda *args: save_data(f))
         
         if details.get("type") == "input":
-            widget = ttk.Entry(field_frame)
-            widget.pack(side="right", fill="x", expand=True)
-            # Use KeyRelease for real-time saving/updating
-            widget.bind("<KeyRelease>", save_data_with_field(field_name)) 
+            if field_name == "Operator Comments":
+                text_container = ttk.Frame(field_frame)
+                text_container.pack(side="right", fill="x", expand=True)
+                text_container.grid_columnconfigure(0, weight=1)
+                text_widget = tk.Text(text_container, height=3, width=20, wrap=tk.WORD, bd=1, relief="solid")
+                text_widget.grid(row=0, column=0, sticky="nsew")
+                
+                widget = text_widget
+                
+                # --- Keyboard navigation for Text widget ---
+                widget.bind("<FocusIn>", lambda e: apply_focus_style(e, True))
+                # Save data on FocusOut
+                widget.bind("<FocusOut>", lambda e: (save_data_with_field(field_name)(e), apply_focus_style(e, False)))
+                widget.bind("<Up>", focus_next_widget)
+                widget.bind("<Down>", focus_next_widget)
+                widget.bind("<Tab>", focus_next_widget)
+                widget.bind("<Shift-Tab>", focus_next_widget) 
+                # -------------------------------------------
+                
+            else:
+                widget = ttk.Entry(field_frame)
+                widget.pack(side="right", fill="x", expand=True)
+
+                # --- Keyboard navigation for Entry widget ---
+                widget.bind("<KeyRelease>", save_data_with_field(field_name)) 
+                widget.bind("<FocusIn>", lambda e: apply_focus_style(e, True))
+                widget.bind("<FocusOut>", lambda e: apply_focus_style(e, False))
+                widget.bind("<Up>", focus_next_widget)
+                widget.bind("<Down>", focus_next_widget)
+                widget.bind("<Tab>", focus_next_widget)
+                widget.bind("<Shift-Tab>", focus_next_widget)
+                # --------------------------------------------
+                
         elif details.get("type") == "dropdown":
             scheme = COLOR_SCHEMES.get(field_name)
             if scheme:
@@ -976,15 +1203,23 @@ def create_input_widgets():
                     field_frame,
                     options=details.get("options", []),
                     color_map=scheme,
-                    # ColorDropdown calls on_change with no args, so we pass field name to its constructor
                     on_change=save_data_with_field(field_name) 
                 )
                 widget.pack(side="right", fill="x", expand=True)
+                # ColorDropdown handles its own label focus/keyboard bindings
             else:
                 widget = ttk.Combobox(field_frame, values=details.get("options", []), state="readonly")
                 widget.pack(side="right", fill="x", expand=True)
-                # Use ComboboxSelected for traditional ttk Combobox saving/updating
                 widget.bind("<<ComboboxSelected>>", save_data_with_field(field_name))
+                
+                # --- Keyboard navigation for Combobox widget ---
+                widget.bind("<FocusIn>", lambda e: apply_focus_style(e, True))
+                widget.bind("<FocusOut>", lambda e: apply_focus_style(e, False))
+                widget.bind("<Up>", focus_next_widget)
+                widget.bind("<Down>", focus_next_widget)
+                widget.bind("<Tab>", focus_next_widget)
+                widget.bind("<Shift-Tab>", focus_next_widget)
+                # ----------------------------------------------
                 
         input_widgets[field_name] = widget
         row_count += 1
@@ -992,7 +1227,6 @@ def create_input_widgets():
 def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=True):
     """
     Fetches and displays a Street View image. If heading is None, relies on the API's default.
-    MODIFIED: Status message now indicates if the image was loaded from the cache.
     """
     global street_view_image_label, current_street_view_url, current_heading
     
@@ -1031,7 +1265,6 @@ def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=Tr
         cache_key = f"{address}_{heading:.2f}_{fov}_{max_request_width}x{max_request_height}" 
     else:
         # Note: When heading is None, the actual heading determined by the API must be stored
-        # This cache key assumes the API returns a consistent default *for a given location*.
         cache_key = f"{address}_default_{fov}_{max_request_width}x{max_request_height}" 
         
     # 4. Check cache
@@ -1042,9 +1275,7 @@ def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=Tr
             street_view_image_label.configure(image=img_tk_cached)
             street_view_image_label.image = img_tk_cached
             
-            # --- MODIFIED STATUS MESSAGE FOR CACHE HIT ---
             status_label.config(text=f"Image loaded from cache. (FOV: {fov}). Click image to open in browser.", foreground="green")
-            # ---------------------------------------------
             return
 
     # Status message before API call
@@ -1095,9 +1326,7 @@ def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=Tr
                  'height': new_height
              }
         
-        # --- MODIFIED STATUS MESSAGE FOR API FETCH ---
         status_label.config(text=f"Image fetched (API Call). (H: {int(current_heading)}°, FOV: {fov}). Click image to open in browser.", foreground="black")
-        # ---------------------------------------------
         
     except requests.exceptions.HTTPError as e:
         status_label.config(text=f"API Error: {e.response.text}", foreground="red")
@@ -1127,14 +1356,15 @@ root.geometry("900x650")
 style = ttk.Style()
 style.configure("TEntry", font=("TkDefaultFont", 12))
 style.configure("TCombobox", font=("TkDefaultFont", 12))
+# Custom style for the field frame to allow highlightthickness to work universally
+style.configure("TFrame", background=root.cget('bg')) 
 
-# --- Treeview Selection Override (Kept here as it is a style.map call on the Toplevel style) ---
+# Treeview tags
 style.map('Treeview',
     foreground=[('selected', 'white')],
     background=[('selected', 'blue')] 
 )
 style.configure("Treeview", rowheight=30) 
-# ------------------------------------------------------
 
 main_paned_window = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
 main_paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -1181,13 +1411,11 @@ tree.column("ID in the Route", width=120, anchor=tk.CENTER)
 tree.column("Address", width=300)
 tree.grid(row=1, column=0, sticky="nsew")
 
-# --- FIXED: Tag configuration is now called on the tree widget itself ---
 tree.tag_configure('Success-Yes', background=GREEN, foreground=FG_ON) 
 tree.tag_configure('Success-No', background=RED, foreground=FG_ON)
 tree.tag_configure('Success-Skipped', background=YELLOW, foreground=FG_OFF)
 tree.tag_configure('Success-Missing', background=LGRAY, foreground=FG_OFF)
-tree.tag_configure('Success-None', background='#ffffff', foreground=FG_OFF) # Default white
-# ------------------------------------------------------------------------
+tree.tag_configure('Success-None', background='#ffffff', foreground=FG_OFF) 
 
 scrollbar = ttk.Scrollbar(left_pane, orient=tk.VERTICAL, command=tree.yview)
 tree.configure(yscrollcommand=scrollbar.set)
@@ -1216,7 +1444,6 @@ street_view_image_label.bind("<Button-3>", start_pan)
 street_view_image_label.bind("<B3-Motion>", do_pan)
 street_view_image_label.bind("<ButtonRelease-3>", stop_pan)
 
-# BIND an event to ensure the map redraws when the window is resized
 def resize_handler(event):
     if current_address_for_image and event.widget == street_view_image_label:
         fetch_and_display_street_view(current_address_for_image, current_heading, current_fov, cache_result=False)
