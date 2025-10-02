@@ -1,9 +1,52 @@
 🤖 Robot Delivery Tracker App Guide
 This application was built using Visual Studio Code to streamline the process of tracking robot deliveries and generating comprehensive reports.
 
-**⚙️ Setup and Installation**
+**🚀 Program Usage**
+Launch by extracting the zip to your desktop. Open phythontest>dist>delivery_tracker_app
+
+Once launched, the application's interface is divided into the Address List (left), and the Data Fields & Street View (right).
+
+1. Loading Addresses
+Click the "Choose CSV File" button to load your stop data:
+
+Load Existing CSV: Upload a CSV file structured with at least two columns: Stop # and Address.
+
+Generate from Image (Gemini API): Upload one or more images containing the delivery manifest or addresses. The Gemini API will extract and format the list.
+
+You must select the Robot ID (e.g., 506, 512) before loading the addresses.
+
+2. Data Entry Workflow
+Select a Stop: Addresses populate the left column. Selecting an address loads its data into the right-hand fields and displays the corresponding static Street View image.
+
+Edit Fields: Use the color-coded dropdowns and text inputs on the right to log the outcome of the delivery attempt. Changes are saved automatically upon interaction.
+
+Street View Panorama: Click the Street View image (bottom right) to open the full interactive panorama in your default web browser for context. Hold right click and drag slowly to pan the camera around. Zoom in by hovering over the streetview image and using scrollwheel up/down.
+
+3. Copy & Paste Data
+This feature is designed for quickly logging identical outcomes across multiple stops:
+
+Select a completed row and click Copy Data.
+
+Select one or more target rows (using Shift + Click or Ctrl + Click).
+
+Click Paste Data to apply all copied field values to the selected rows. (The Stop # and Address remain unchanged.)
+
+4. End-of-Day Reporting
+Click "Show Summary" to generate a statistics pop-up:
+
+This report automatically calculates key metrics (e.g., # of Robot Deliveries, # of Interventions) from your sheet data.
+
+Manual Entry: Certain fields (Revenue, Shift Duration, etc.) must be entered manually into the pop-up before you screenshot the final report for posting.
+
+(Note: Location and Customer fields are currently hardcoded to Austin, US, and Veho.)
+
+5. Exporting Data
+Click "Export CSV" to save a final .csv file containing all the original data and the recorded outcomes. This data can be directly pasted into the master delivery tracking sheet.
+
+
+**⚙️ Setup and Installation through Visual Studio Code**
 Dependencies
-To run or build the application, ensure you have the following packages installed (most should be in your virtual environment):
+To run or build the application through visual studio code, ensure you have the following packages installed (most should be in your virtual environment):
 
 Python (Base language)
 
@@ -41,42 +84,3 @@ To Run App: Open the dist folder and launch the delivery_tracker_app executable.
 
 Troubleshooting (Linux): If you get an error, right-click the app, go to Properties, and ensure the permission "Executable as Program" is enabled.
 
-**🚀 Program Usage**
-Once launched, the application's interface is divided into the Address List (left), and the Data Fields & Street View (right).
-
-1. Loading Addresses
-Click the "Choose CSV File" button to load your stop data:
-
-Load Existing CSV: Upload a CSV file structured with at least two columns: Stop # and Address.
-
-Generate from Image (Gemini API): Upload one or more images containing the delivery manifest or addresses. The Gemini API will extract and format the list.
-
-You must select the Robot ID (e.g., 506, 512) before loading the addresses.
-
-2. Data Entry Workflow
-Select a Stop: Addresses populate the left column. Selecting an address loads its data into the right-hand fields and displays the corresponding static Street View image.
-
-Edit Fields: Use the color-coded dropdowns and text inputs on the right to log the outcome of the delivery attempt. Changes are saved automatically upon interaction.
-
-Street View Panorama: Click the Street View image (bottom right) to open the full interactive panorama in your default web browser for context.
-
-3. Copy & Paste Data
-This feature is designed for quickly logging identical outcomes across multiple stops:
-
-Select a completed row and click Copy Data.
-
-Select one or more target rows (using Shift + Click or Ctrl + Click).
-
-Click Paste Data to apply all copied field values to the selected rows. (The Stop # and Address remain unchanged.)
-
-4. End-of-Day Reporting
-Click "Show Summary" to generate a statistics pop-up:
-
-This report automatically calculates key metrics (e.g., # of Robot Deliveries, # of Interventions) from your sheet data.
-
-Manual Entry: Certain fields (Revenue, Shift Duration, etc.) must be entered manually into the pop-up before you screenshot the final report for posting.
-
-(Note: Location and Customer fields are currently hardcoded to Austin, US, and Veho.)
-
-5. Exporting Data
-Click "Export CSV" to save a final .csv file containing all the original data and the recorded outcomes. This data can be directly pasted into the master delivery tracking sheet.
