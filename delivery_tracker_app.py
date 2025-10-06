@@ -13,8 +13,10 @@ from io import StringIO
 import math
 import os
 import tempfile 
-import re # New import for regex in update check
-from tkinter import messagebox # New import for update prompt
+import re 
+from tkinter import messagebox 
+import sys # NEW: Import for system exit/update handling
+import base64 # NEW: Import for decoding GitHub API response
 
 # -------------------------------------------------------------------
 # Global state and API Keys
@@ -40,9 +42,10 @@ current_heading = 0
 current_fov = 90
 last_mouse_x = 0
 
-# NEW CONSTANT: URL for the raw content of the Python file on your GitHub repository
-# UPDATED FOR YOUR REPO: masonalmazanrivr/pythontest
-GITHUB_RAW_FILE_URL = "https://raw.githubusercontent.com/masonalmazanrivr/pythontest/refs/heads/main/delivery_tracker_app.py" 
+# --- UPDATE CONSTANTS ---
+# Use the GitHub API for non-cached file fetching
+GITHUB_API_URL = "https://api.github.com/repos/masonalmazanrivr/pythontest/contents/delivery_tracker_app.py"
+UPDATE_SUCCESS_CODE = 42 # Special exit code to signal the launcher to restart
 
 # NOTE: REPLACE THESE WITH YOUR ACTUAL KEYS!
 google_api_key = "AIzaSyBKE225e5Eq4tEyAPqJXO_Hd5grSeoYcqc" # Google Maps Street View API Key
@@ -142,7 +145,7 @@ COLOR_SCHEMES = {
 # -------------------------------------------------------------------
 # Focus and Navigation Logic
 # -------------------------------------------------------------------
-
+# ... (focus_next_widget, apply_focus_style - KEEP AS IS)
 def focus_next_widget(event):
     """Moves focus to the next/previous widget in the defined order, handling Up/Down arrows."""
     widgets = list(input_widgets.values())
@@ -202,9 +205,11 @@ def apply_focus_style(event, is_focus_in):
     else:
         container_frame.config(highlightthickness=0)
 
+
 # -------------------------------------------------------------------
 # Treeview Tag Helper Functions
 # -------------------------------------------------------------------
+# ... (get_tag_from_success_value, apply_success_tag - KEEP AS IS)
 
 def get_tag_from_success_value(success_value: str) -> str:
     """Maps the Success field value to a Treeview tag name."""
@@ -231,6 +236,7 @@ def apply_success_tag(item_id, success_value):
     tree.item(item_id, tags=tuple(new_tags))
 
 # ---------- Colorized dropdown widget (toggle + click-away) ----------
+# ... (ColorDropdown Class - KEEP AS IS)
 class ColorDropdown(tk.Frame):
     """Colored dropdown using an overrideredirect Toplevel menu, now with keyboard navigation."""
     EMPTY_VALUE = "" 
@@ -518,7 +524,7 @@ def export_csv_file():
             status_label.config(text=f"An error occurred while exporting: {e}")
 
 # -------------------------------------------------------------------
-# Update Check Logic (NEW SECTION)
+# Update Check Logic
 # -------------------------------------------------------------------
 
 def parse_version(version_str):
@@ -532,79 +538,91 @@ def parse_version(version_str):
 
 def check_for_update():
     """
-    Checks the GitHub repository's main file for a newer version.
+    Checks the GitHub repository for a newer version using the GitHub Contents API,
+    which provides non-cached, instantaneous file content, and replaces the running file.
     """
-    # 1. Get current version
     current_version_tuple = parse_version(APP_VERSION)
     
     try:
-        # 2. Fetch the raw content of the app file from GitHub
-        response = requests.get(GITHUB_RAW_FILE_URL, timeout=5)
+        # 1. Fetch file data from GitHub Contents API
+        params = {'ref': 'main'}
+        
+        api_url = "https://api.github.com/repos/masonalmazanrivr/pythontest/contents/delivery_tracker_app.py"
+        
+        response = requests.get(api_url, params=params, timeout=5)
         response.raise_for_status()
         
-        file_content = response.text
+        file_data = response.json()
+        
+        # 2. Extract and Decode Content
+        if 'content' not in file_data:
+            status_label.config(text="API Error: File content structure missing.", foreground="red")
+            return
+
+        # GitHub API returns file content as a base64 encoded string
+        base64_content = file_data['content'].replace('\n', '')
+        file_content = base64.b64decode(base64_content).decode('utf-8')
+
         latest_version = None
         
-        # 3. Search for the APP_VERSION line in the file content
+        # 3. Search for the APP_VERSION definition in the decoded content
+        for line in file_content.splitlines():
+            if line.strip().startswith('APP_VERSION'):
+                match = re.search(r'["\'](\d+\.\d+\.\d+)["\']', line)
+                if match:
+                    latest_version = match.group(1).strip()
+                    break 
         
-        # Look for the exact line containing APP_VERSION assignment
-        version_line_match = re.search(r'^\s*APP_VERSION\s*=', file_content, re.MULTILINE)
-        
-        if version_line_match:
-            # Found the line. Now, extract the quoted string using a secondary search
-            # This pattern is more robust against different spacing on the line
-            line_start_index = version_line_match.start()
-            
-            # Find the end of the line (or next newline character)
-            line_end_index = file_content.find('\n', line_start_index)
-            if line_end_index == -1:
-                line_end_index = len(file_content)
-                
-            version_definition_line = file_content[line_start_index:line_end_index]
-            
-            # Now extract the quoted version number from the isolated line: "X.Y.Z"
-            version_value_match = re.search(r'["\'](\d+\.\d+\.\d+)["\']', version_definition_line)
-            
-            if version_value_match:
-                latest_version = version_value_match.group(1).strip()
-                latest_version_tuple = parse_version(latest_version)
-            else:
-                # This should only happen if the line format is completely unexpected
-                status_label.config(text="Error: Found version line but couldn't parse value.", foreground="orange")
-                return
-        else:
-            status_label.config(text="Error: Could not find APP_VERSION in the GitHub file.", foreground="orange")
+        if not latest_version:
+            status_label.config(text="Error: Could not find or parse APP_VERSION in the API data.", foreground="orange")
             return
+            
+        latest_version_tuple = parse_version(latest_version)
         
-        # 4. Compare versions (rest of the logic remains the same)
+        # 4. Compare versions
         if latest_version_tuple > current_version_tuple:
             # Newer version found!
-            status_label.config(text=f"Update available: v{latest_version}", foreground="red")
+            status_label.config(text=f"Update available: v{latest_version}. Click OK to install.", foreground="red")
             
-            result = messagebox.askyesno(
-                "Update Available 🚀",
-                f"A new version (v{latest_version}) is available!\n\n"
-                f"Your current version: v{APP_VERSION}\n\n"
-                "Would you like to open the GitHub repository to download the update?"
-            )
-            
-            if result:
-                parts = GITHUB_RAW_FILE_URL.split('/')
-                project_url = f"https://github.com/{parts[3]}/{parts[4]}"
-                webbrowser.open(project_url)
+            # Use askokcancel to require user confirmation before closing/installing
+            if messagebox.askokcancel("Update Available 🚀", f"Version v{latest_version} is available! Do you want to download and install the update now?\n\nThe app will close and immediately restart with the new version."):
                 
+                # --- AUTO-INSTALL LOGIC ---
+                try:
+                    # Overwrite the currently running file with the new content
+                    current_script_path = os.path.abspath(__file__)
+                    
+                    with open(current_script_path, 'w', encoding='utf-8') as f:
+                        f.write(file_content)
+                        
+                    # Notify user (optional, as the app is about to close)
+                    print(f"[Update] Successfully installed v{latest_version}. Restarting...")
+                    
+                    # Signal the launcher to restart the app
+                    sys.exit(UPDATE_SUCCESS_CODE)
+                    
+                except Exception as install_e:
+                    messagebox.showerror(
+                        "Installation Error",
+                        f"Failed to install update: {install_e}\n\n"
+                        "Please check file permissions or try manually downloading from GitHub."
+                    )
+                    
         else:
             if not delivery_data:
                 status_label.config(text=f"v{APP_VERSION} is the latest version. Select a CSV file to get started.", foreground="darkgreen")
             
     except requests.exceptions.RequestException as e:
+        # Handle API connection errors
         print(f"Update check failed: {e}")
         if not delivery_data:
             status_label.config(text="Could not check for updates. Select a CSV file to get started.", foreground="orange")
-# -------------------------------------------------------------------
-# Core Application Functions
-# -------------------------------------------------------------------
 
+
+# -------------------------------------------------------------------
+# Core Application Functions (KEEP AS IS)
+# -------------------------------------------------------------------
+# ... (rest of the core application functions and GUI setup - KEEP AS IS)
 def generate_csv_from_image(image_filepaths, date, robot_id, popup_window, status_label_popup):
     """Sends images to Gemini, extracts and loads data."""
     try:
@@ -1591,7 +1609,7 @@ def open_browser_link(event):
 
 
 # -------------------------------------------------------------------
-# GUI Setup
+# GUI Setup (KEEP AS IS)
 # -------------------------------------------------------------------
 root = tk.Tk()
 root.title("Robot Delivery Tracker")
@@ -1699,6 +1717,16 @@ street_view_image_label.bind("<Configure>", resize_handler)
 version_label = tk.Label(root, text=f"v{APP_VERSION}", font=("TkDefaultFont", 8), fg="gray")
 version_label.pack(side=tk.RIGHT, padx=5, pady=2)
 # ------------------------------------------------
+
+def on_app_closing():
+    """Ensure a clean exit when the user closes the window (exit code 0)."""
+    # This is necessary because Tkinter's default destroy() might not return
+    # a zero exit code when subprocessed.
+    root.destroy()
+    sys.exit(0) # Guarantee a clean exit signal
+
+# Bind the handler to the window close event
+root.protocol("WM_DELETE_WINDOW", on_app_closing)
 
 # ------------------------------------------------
 # NEW: CHECK FOR UPDATES ON STARTUP
