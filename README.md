@@ -33,7 +33,7 @@ Click the **Load Data** button to choose your preferred method for importing sto
 
 * **Select a Stop:** Addresses populate the left column under the clear header **Stop \#**. Selecting a stop loads its specific data into the right-hand fields and displays the corresponding static Street View image.
 * **Edit Fields:** Use the color-coded dropdowns and text inputs on the right to log the outcome of the delivery attempt.
-* **Automatic Saving:** **Changes are saved automatically** to a temporary auto-save file (`autosave_report_[...]`) upon interacting with a dropdown, typing in an entry box, or using Paste.
+* **Automatic Saving:** **Changes are saved automatically** to a temporary auto-save file *(`OtherLocations>Ubuntu>tmp>autosave_report_[...]`)* upon interacting with a dropdown, typing in an entry box, or using Paste.
 
 ### 4. Street View Interaction (Visual Context)
 
