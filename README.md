@@ -6,7 +6,7 @@ This application was built using Python and the `tkinter` library to streamline 
 
 ## 🚀 Program Usage
 
-Launch by extracting the zip to your desktop. Open $\text{phythontest} > \text{dist} > \text{delivery\_tracker\_app}$.
+Launch by extracting the zip to your desktop. Open **phythontest > dist > delivery_tracker_app**
 
 Once launched, the application's interface is divided into the **Stop List** (left) and the **Data Fields & Street View** (right).
 
