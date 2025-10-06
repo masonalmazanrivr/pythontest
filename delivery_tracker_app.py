@@ -29,7 +29,7 @@ image_cache = {}
 street_view_image_label = None
 
 # NEW GLOBAL VERSION DEFINITION
-APP_VERSION = "25.10.4"
+APP_VERSION = "25.10.5"
 
 # NEW GLOBAL VARIABLE FOR AUTO-SAVE
 auto_save_filepath = None 
@@ -42,7 +42,7 @@ last_mouse_x = 0
 
 # NEW CONSTANT: URL for the raw content of the Python file on your GitHub repository
 # UPDATED FOR YOUR REPO: masonalmazanrivr/pythontest
-GITHUB_RAW_FILE_URL = "https://raw.githubusercontent.com/masonalmazanrivr/pythontest/main/delivery_tracker_app.py" 
+GITHUB_RAW_FILE_URL = "https://raw.githubusercontent.com/masonalmazanrivr/pythontest/refs/heads/main/delivery_tracker_app.py" 
 
 # NOTE: REPLACE THESE WITH YOUR ACTUAL KEYS!
 google_api_key = "AIzaSyBKE225e5Eq4tEyAPqJXO_Hd5grSeoYcqc" # Google Maps Street View API Key
@@ -546,22 +546,41 @@ def check_for_update():
         latest_version = None
         
         # 3. Search for the APP_VERSION line in the file content
-        # Pattern looks for 'APP_VERSION = "X.Y.Z"'
-        match = re.search(r'APP_VERSION\s*=\s*["\'](\d+\.\d+\.\d+)["\']', file_content)
         
-        if match:
-            latest_version = match.group(1).strip()
-            latest_version_tuple = parse_version(latest_version)
+        # Look for the exact line containing APP_VERSION assignment
+        version_line_match = re.search(r'^\s*APP_VERSION\s*=', file_content, re.MULTILINE)
+        
+        if version_line_match:
+            # Found the line. Now, extract the quoted string using a secondary search
+            # This pattern is more robust against different spacing on the line
+            line_start_index = version_line_match.start()
+            
+            # Find the end of the line (or next newline character)
+            line_end_index = file_content.find('\n', line_start_index)
+            if line_end_index == -1:
+                line_end_index = len(file_content)
+                
+            version_definition_line = file_content[line_start_index:line_end_index]
+            
+            # Now extract the quoted version number from the isolated line: "X.Y.Z"
+            version_value_match = re.search(r'["\'](\d+\.\d+\.\d+)["\']', version_definition_line)
+            
+            if version_value_match:
+                latest_version = version_value_match.group(1).strip()
+                latest_version_tuple = parse_version(latest_version)
+            else:
+                # This should only happen if the line format is completely unexpected
+                status_label.config(text="Error: Found version line but couldn't parse value.", foreground="orange")
+                return
         else:
             status_label.config(text="Error: Could not find APP_VERSION in the GitHub file.", foreground="orange")
             return
         
-        # 4. Compare versions
+        # 4. Compare versions (rest of the logic remains the same)
         if latest_version_tuple > current_version_tuple:
             # Newer version found!
             status_label.config(text=f"Update available: v{latest_version}", foreground="red")
             
-            # Show update prompt
             result = messagebox.askyesno(
                 "Update Available 🚀",
                 f"A new version (v{latest_version}) is available!\n\n"
@@ -570,23 +589,18 @@ def check_for_update():
             )
             
             if result:
-                # Construct the main repository URL from the raw file URL
                 parts = GITHUB_RAW_FILE_URL.split('/')
-                # parts[3] is username, parts[4] is repo name
                 project_url = f"https://github.com/{parts[3]}/{parts[4]}"
                 webbrowser.open(project_url)
                 
         else:
-            # Only show this if data hasn't been loaded yet, or if it's the latest
             if not delivery_data:
                 status_label.config(text=f"v{APP_VERSION} is the latest version. Select a CSV file to get started.", foreground="darkgreen")
             
     except requests.exceptions.RequestException as e:
         print(f"Update check failed: {e}")
-        # Only show this if data hasn't been loaded yet
         if not delivery_data:
             status_label.config(text="Could not check for updates. Select a CSV file to get started.", foreground="orange")
-
 # -------------------------------------------------------------------
 # Core Application Functions
 # -------------------------------------------------------------------
