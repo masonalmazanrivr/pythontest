@@ -13,6 +13,8 @@ from io import StringIO
 import math
 import os
 import tempfile 
+import re # New import for regex in update check
+from tkinter import messagebox # New import for update prompt
 
 # -------------------------------------------------------------------
 # Global state and API Keys
@@ -26,6 +28,9 @@ current_street_view_url = ""
 image_cache = {}
 street_view_image_label = None
 
+# NEW GLOBAL VERSION DEFINITION
+APP_VERSION = "25.10.4"
+
 # NEW GLOBAL VARIABLE FOR AUTO-SAVE
 auto_save_filepath = None 
 
@@ -34,6 +39,10 @@ current_address_for_image = ""
 current_heading = 0
 current_fov = 90
 last_mouse_x = 0
+
+# NEW CONSTANT: URL for the raw content of the Python file on your GitHub repository
+# UPDATED FOR YOUR REPO: masonalmazanrivr/pythontest
+GITHUB_RAW_FILE_URL = "https://raw.githubusercontent.com/masonalmazanrivr/pythontest/main/delivery_tracker_app.py" 
 
 # NOTE: REPLACE THESE WITH YOUR ACTUAL KEYS!
 google_api_key = "AIzaSyBKE225e5Eq4tEyAPqJXO_Hd5grSeoYcqc" # Google Maps Street View API Key
@@ -509,6 +518,76 @@ def export_csv_file():
             status_label.config(text=f"An error occurred while exporting: {e}")
 
 # -------------------------------------------------------------------
+# Update Check Logic (NEW SECTION)
+# -------------------------------------------------------------------
+
+def parse_version(version_str):
+    """Parses a version string (e.g., '25.10.4') into a comparable tuple of integers."""
+    # Ensure only digits and dots are considered, then split and convert to int
+    clean_version = re.sub(r'[^\d.]', '', version_str)
+    try:
+        return tuple(map(int, clean_version.split('.')))
+    except ValueError:
+        return (0, 0, 0) # Fallback if parsing fails
+
+def check_for_update():
+    """
+    Checks the GitHub repository's main file for a newer version.
+    """
+    # 1. Get current version
+    current_version_tuple = parse_version(APP_VERSION)
+    
+    try:
+        # 2. Fetch the raw content of the app file from GitHub
+        response = requests.get(GITHUB_RAW_FILE_URL, timeout=5)
+        response.raise_for_status()
+        
+        file_content = response.text
+        latest_version = None
+        
+        # 3. Search for the APP_VERSION line in the file content
+        # Pattern looks for 'APP_VERSION = "X.Y.Z"'
+        match = re.search(r'APP_VERSION\s*=\s*["\'](\d+\.\d+\.\d+)["\']', file_content)
+        
+        if match:
+            latest_version = match.group(1).strip()
+            latest_version_tuple = parse_version(latest_version)
+        else:
+            status_label.config(text="Error: Could not find APP_VERSION in the GitHub file.", foreground="orange")
+            return
+        
+        # 4. Compare versions
+        if latest_version_tuple > current_version_tuple:
+            # Newer version found!
+            status_label.config(text=f"Update available: v{latest_version}", foreground="red")
+            
+            # Show update prompt
+            result = messagebox.askyesno(
+                "Update Available 🚀",
+                f"A new version (v{latest_version}) is available!\n\n"
+                f"Your current version: v{APP_VERSION}\n\n"
+                "Would you like to open the GitHub repository to download the update?"
+            )
+            
+            if result:
+                # Construct the main repository URL from the raw file URL
+                parts = GITHUB_RAW_FILE_URL.split('/')
+                # parts[3] is username, parts[4] is repo name
+                project_url = f"https://github.com/{parts[3]}/{parts[4]}"
+                webbrowser.open(project_url)
+                
+        else:
+            # Only show this if data hasn't been loaded yet, or if it's the latest
+            if not delivery_data:
+                status_label.config(text=f"v{APP_VERSION} is the latest version. Select a CSV file to get started.", foreground="darkgreen")
+            
+    except requests.exceptions.RequestException as e:
+        print(f"Update check failed: {e}")
+        # Only show this if data hasn't been loaded yet
+        if not delivery_data:
+            status_label.config(text="Could not check for updates. Select a CSV file to get started.", foreground="orange")
+
+# -------------------------------------------------------------------
 # Core Application Functions
 # -------------------------------------------------------------------
 
@@ -630,15 +709,15 @@ def show_image_to_csv_popup(date, robot_id):
             selected_filepaths = filepaths 
             
             if len(filepaths) == 1:
-                 file_path_var.set(f".../{filepaths[0].split('/')[-1]}")
+                file_path_var.set(f".../{filepaths[0].split('/')[-1]}")
             else:
-                 file_path_var.set(f"{len(filepaths)} files selected.")
-                 
+                file_path_var.set(f"{len(filepaths)} files selected.")
+                
             status_label_popup.config(text="Files selected. Click Generate.", foreground="black")
             generate_button.config(state=tk.NORMAL)
         else:
-             file_path_var.set("No files selected.")
-             status_label_popup.config(text="", foreground="black")
+            file_path_var.set("No files selected.")
+            status_label_popup.config(text="", foreground="black")
 
 
     def generate_and_continue():
@@ -700,7 +779,6 @@ def check_csv_for_report_details(filepath):
 def choose_csv_file():
     """
     Menu to choose between loading an existing CSV or generating from an image.
-    MODIFIED: Now checks CSV content and skips the confirmation prompt if details are found.
     """
     popup = tk.Toplevel(root)
     popup.title("Load Data Option")
@@ -807,6 +885,8 @@ def start_data_load(source, date, robot_id, is_content=False):
             id_column_name = 'ID in the Route'
         elif 'Stop Number' in fieldnames_from_source:
             id_column_name = 'Stop Number' 
+        elif 'Stop' in fieldnames_from_source:
+            id_column_name = 'Stop' 
             
         if not id_column_name:
             status_label.config(text="Error: Data must contain 'ID in the Route' or 'Stop Number' header.", foreground="red")
@@ -1016,14 +1096,14 @@ def save_data(field_name_changed=None):
              # Fallback to update everything for the *first* selected item if the focus isn't clear
              first_selected_index = tree.index(selected_items[0])
              for key, widget in input_widgets.items():
-                if isinstance(widget, ttk.Combobox):
-                    delivery_data[first_selected_index][key] = widget.get()
-                elif isinstance(widget, ttk.Entry):
-                    delivery_data[first_selected_index][key] = widget.get()
-                elif isinstance(widget, ColorDropdown):
-                    delivery_data[first_selected_index][key] = widget.get()
-                elif isinstance(widget, tk.Text):
-                    delivery_data[first_selected_index][key] = widget.get('1.0', tk.END).strip()
+                 if isinstance(widget, ttk.Combobox):
+                     delivery_data[first_selected_index][key] = widget.get()
+                 elif isinstance(widget, ttk.Entry):
+                     delivery_data[first_selected_index][key] = widget.get()
+                 elif isinstance(widget, ColorDropdown):
+                     delivery_data[first_selected_index][key] = widget.get()
+                 elif isinstance(widget, tk.Text):
+                     delivery_data[first_selected_index][key] = widget.get('1.0', tk.END).strip()
              
              # If using the fallback, we still need to auto-save
              write_data_to_csv()
@@ -1600,5 +1680,15 @@ def resize_handler(event):
 
 street_view_image_label.bind("<Configure>", resize_handler)
 
+
+# --- VERSION LABEL (Added to the root window) ---
+version_label = tk.Label(root, text=f"v{APP_VERSION}", font=("TkDefaultFont", 8), fg="gray")
+version_label.pack(side=tk.RIGHT, padx=5, pady=2)
+# ------------------------------------------------
+
+# ------------------------------------------------
+# NEW: CHECK FOR UPDATES ON STARTUP
+# ------------------------------------------------
+check_for_update()
 
 root.mainloop()
