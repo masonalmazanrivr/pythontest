@@ -12,9 +12,9 @@ from google.genai.errors import APIError
 from io import StringIO
 import math
 import os
-import tempfile 
-import re # New import for regex in update check
-from tkinter import messagebox # New import for update prompt
+import tempfile
+import re
+from tkinter import messagebox
 
 # -------------------------------------------------------------------
 # Global state and API Keys
@@ -22,31 +22,37 @@ from tkinter import messagebox # New import for update prompt
 delivery_data = []
 selected_row_id = None
 input_widgets = {}
-summary_inputs = {} 
-copied_data = {} 
-current_street_view_url = "" 
+summary_inputs = {}
+copied_data = {}
+current_street_view_url = ""
 image_cache = {}
 street_view_image_label = None
 
-# NEW GLOBAL VERSION DEFINITION
-APP_VERSION = "25.10.4"
+# GLOBAL VERSION DEFINITION
+APP_VERSION = "25.10.5"
 
-# NEW GLOBAL VARIABLE FOR AUTO-SAVE
-auto_save_filepath = None 
+# GLOBAL VARIABLE FOR AUTO-SAVE
+auto_save_filepath = None
 
 # IMAGE INTERACTION GLOBALS
 current_address_for_image = ""
 current_heading = 0
 current_fov = 90
 last_mouse_x = 0
+last_displayed_width = 0
+last_displayed_height = 0
 
-# NEW CONSTANT: URL for the raw content of the Python file on your GitHub repository
-# UPDATED FOR YOUR REPO: masonalmazanrivr/pythontest
-GITHUB_RAW_FILE_URL = "https://raw.githubusercontent.com/masonalmazanrivr/pythontest/main/delivery_tracker_app.py" 
+# FIX FOR LAYOUT STABILITY AND SQUARE RATIO
+# Setting a fixed, square size
+MIN_IMAGE_WIDTH = 450
+MIN_IMAGE_HEIGHT = 450 
+
+# GITHUB RAW FILE URL
+GITHUB_RAW_FILE_URL = "https://raw.githubusercontent.com/masonalmazanrivr/pythontest/main/delivery_tracker_app.py"
 
 # NOTE: REPLACE THESE WITH YOUR ACTUAL KEYS!
 google_api_key = "AIzaSyBKE225e5Eq4tEyAPqJXO_Hd5grSeoYcqc" # Google Maps Street View API Key
-GEMINI_API_KEY = "AIzaSyCDcp2WtRkpsuUsr3b3rTN_mkErQXsdv1I" # Gemini API Key for image processing
+GEMINI_API_KEY = "AIzaSyCDcp2WtRkps_sUsr3b3rTN_mkErQXsdv1I" # Gemini API Key for image processing
 
 # Field definitions
 field_map = {
@@ -160,12 +166,12 @@ def focus_next_widget(event):
             current_widget = focused.master.master
         
         if not current_widget:
-            return 
+            return
             
         current_index = widgets.index(current_widget)
         
     except ValueError:
-        return 
+        return
 
     next_index = current_index
     if event.keysym in ('Down', 'Tab'):
@@ -233,7 +239,7 @@ def apply_success_tag(item_id, success_value):
 # ---------- Colorized dropdown widget (toggle + click-away) ----------
 class ColorDropdown(tk.Frame):
     """Colored dropdown using an overrideredirect Toplevel menu, now with keyboard navigation."""
-    EMPTY_VALUE = "" 
+    EMPTY_VALUE = ""
     
     def __init__(self, parent, options, color_map, on_change=None):
         # FIX APPLIED HERE: highlightthickness is set on the container Frame.
@@ -458,10 +464,10 @@ def initialize_auto_save_file(date, robot_id, source_name):
             writer = csv.DictWriter(csvfile, fieldnames=template_headers)
             writer.writeheader()
         
-        status_label.config(text=f"Loaded {len(delivery_data)} stops from '{source_name}'. Auto-saving to: {auto_save_filepath}", foreground="black")
+        status_label.config(text=f"Loaded {len(delivery_data)} stops from '{source_name}'. Auto-saving to: {auto_save_filepath}", anchor=tk.W, foreground="black")
     
     except Exception as e:
-        status_label.config(text=f"Error initializing auto-save file: {e}", foreground="red")
+        status_label.config(text=f"Error initializing auto-save file: {e}", anchor=tk.W, foreground="red")
         auto_save_filepath = None # Disable auto-save if initialization fails
         
 def write_data_to_csv():
@@ -470,28 +476,27 @@ def write_data_to_csv():
     This is called by save_data on every change.
     """
     global auto_save_filepath
-    if not delivery_data or not auto_save_filepath:
+    if not delivery_data and not auto_save_filepath:
         return
-        
+
     try:
         template_headers = list(field_map.keys())
+        # Use 'w' mode to overwrite, ensuring the file reflects the current state (including deletions)
         with open(auto_save_filepath, 'w', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=template_headers)
             writer.writeheader()
-            writer.writerows(delivery_data)
-            
-        # Optional: Add a subtle status update, but avoid spamming the status bar
-        # status_label.config(text=f"Data auto-saved.", foreground="darkgreen")
+            if delivery_data:
+                writer.writerows(delivery_data)
         
     except Exception as e:
         # Crucial to alert user if auto-save fails
-        status_label.config(text=f"CRITICAL AUTO-SAVE ERROR: {e}", foreground="red")
+        status_label.config(text=f"CRITICAL AUTO-SAVE ERROR: {e}", anchor=tk.W, foreground="red")
 
 
 def export_csv_file():
     """Exports all current data to a CSV file."""
     if not delivery_data:
-        status_label.config(text="No data to export. Please load data first.")
+        status_label.config(text="No data to export. Please load data first.", anchor=tk.W)
         return
         
     # Suggest the autosave path as the default save location and name
@@ -507,18 +512,17 @@ def export_csv_file():
     )
     if filepath:
         try:
-            # We already have a function to write the data, so just use it.
             template_headers = list(field_map.keys())
             with open(filepath, 'w', newline='') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=template_headers)
                 writer.writeheader()
                 writer.writerows(delivery_data)
-            status_label.config(text=f"Final Report saved to '{filepath.split('/')[-1]}'")
+            status_label.config(text=f"Final Report saved to '{filepath.split('/')[-1]}'", anchor=tk.W)
         except Exception as e:
-            status_label.config(text=f"An error occurred while exporting: {e}")
+            status_label.config(text=f"An error occurred while exporting: {e}", anchor=tk.W)
 
 # -------------------------------------------------------------------
-# Update Check Logic (NEW SECTION)
+# Update Check Logic
 # -------------------------------------------------------------------
 
 def parse_version(version_str):
@@ -553,13 +557,13 @@ def check_for_update():
             latest_version = match.group(1).strip()
             latest_version_tuple = parse_version(latest_version)
         else:
-            status_label.config(text="Error: Could not find APP_VERSION in the GitHub file.", foreground="orange")
+            status_label.config(text="Error: Could not find APP_VERSION in the GitHub file.", anchor=tk.W, foreground="orange")
             return
         
         # 4. Compare versions
         if latest_version_tuple > current_version_tuple:
             # Newer version found!
-            status_label.config(text=f"Update available: v{latest_version}", foreground="red")
+            status_label.config(text=f"Update available: v{latest_version}", anchor=tk.W, foreground="red")
             
             # Show update prompt
             result = messagebox.askyesno(
@@ -579,13 +583,13 @@ def check_for_update():
         else:
             # Only show this if data hasn't been loaded yet, or if it's the latest
             if not delivery_data:
-                status_label.config(text=f"v{APP_VERSION} is the latest version. Select a CSV file to get started.", foreground="darkgreen")
+                status_label.config(text=f"v{APP_VERSION} is the latest version. Select a CSV file to get started.", anchor=tk.W, foreground="darkgreen")
             
     except requests.exceptions.RequestException as e:
         print(f"Update check failed: {e}")
         # Only show this if data hasn't been loaded yet
         if not delivery_data:
-            status_label.config(text="Could not check for updates. Select a CSV file to get started.", foreground="orange")
+            status_label.config(text="Could not check for updates. Select a CSV file to get started.", anchor=tk.W, foreground="orange")
 
 # -------------------------------------------------------------------
 # Core Application Functions
@@ -623,10 +627,10 @@ def generate_csv_from_image(image_filepaths, date, robot_id, popup_window, statu
 
                 if ',' in line:
                     clean_lines.append(line)
-                    
+                        
             if is_first_image and not any("Stop Number" in l and "Address" in l for l in clean_lines):
                  clean_lines.insert(0, "Stop Number,Address")
-                 
+                        
             return "\n".join(clean_lines)
 
         
@@ -698,7 +702,7 @@ def show_image_to_csv_popup(date, robot_id):
         
         filepaths = filedialog.askopenfilenames( 
             title="Select Image Files",
-            initialdir="/home/mason/Desktop/images",
+            initialdir=os.path.expanduser("~"),
             filetypes=[
                 ("Image files", "*.png;*.jpg;*.jpeg"),
                 ("All Files", "*.*")
@@ -799,7 +803,7 @@ def choose_csv_file():
             
             if date and robot_id:
                 # SKIP PROMPT: Start data load directly with extracted values
-                status_label.config(text=f"Report details found in CSV. Loading data...", foreground="darkgreen")
+                status_label.config(text=f"Report details found in CSV. Loading data...", anchor=tk.W, foreground="darkgreen")
                 start_data_load(filepath, date, robot_id)
             else:
                 # SHOW PROMPT: Report details were missing or inconsistent
@@ -889,7 +893,7 @@ def start_data_load(source, date, robot_id, is_content=False):
             id_column_name = 'Stop' 
             
         if not id_column_name:
-            status_label.config(text="Error: Data must contain 'ID in the Route' or 'Stop Number' header.", foreground="red")
+            status_label.config(text="Error: Data must contain 'ID in the Route' or 'Stop Number' header.", anchor=tk.W, foreground="red")
             if not is_content: csvfile.close()
             return
 
@@ -953,7 +957,7 @@ def start_data_load(source, date, robot_id, is_content=False):
             write_data_to_csv()
             
     except Exception as e:
-        status_label.config(text=f"An error occurred loading data: {e}", foreground="red")
+        status_label.config(text=f"An error occurred loading data: {e}", anchor=tk.W, foreground="red")
         if 'csvfile' in locals() and not is_content:
             try: csvfile.close()
             except: pass
@@ -1028,7 +1032,7 @@ def stop_pan(event):
     global current_address_for_image, current_heading, current_fov
     if current_address_for_image:
         fetch_and_display_street_view(current_address_for_image, current_heading, current_fov, cache_result=True)
-        status_label.config(text=f"Image panned to {int(current_heading)}° heading. Click image to open in browser.")
+        status_label.config(text=f"Image panned to {int(current_heading)}° heading. Click image to open in browser.", anchor=tk.W)
 
 def populate_input_fields(data):
     """Populates the input widgets with data for the selected row."""
@@ -1129,11 +1133,68 @@ def save_data(field_name_changed=None):
         # ----------------------------------------------------
         
     if current_field_name:
-        status_label.config(text=f"Updated '{current_field_name}' for {len(selected_items)} item(s).")
+        status_label.config(text=f"Updated '{current_field_name}' for {len(selected_items)} item(s).", anchor=tk.W)
     
     # --- AUTO-SAVE AFTER DATA UPDATE ---
     write_data_to_csv()
     # -----------------------------------
+    
+def delete_selected_stop():
+    """
+    Deletes the currently selected row(s) from the Treeview and delivery_data list.
+    """
+    global delivery_data
+    selected_items = tree.selection()
+    
+    if not selected_items:
+        status_label.config(text="No stop selected to delete.", anchor=tk.W, foreground="orange")
+        return
+
+    # Use a set to store indices to delete, in reverse order
+    # so deleting doesn't shift the indices of items yet to be deleted.
+    indices_to_delete = sorted([tree.index(item) for item in selected_items], reverse=True)
+    
+    deleted_count = 0
+    
+    for index in indices_to_delete:
+        if 0 <= index < len(delivery_data):
+            # 1. Remove from the global list
+            del delivery_data[index]
+            deleted_count += 1
+    
+    # 2. Remove from the Treeview
+    for item in selected_items:
+        tree.delete(item)
+        
+    # 3. Update the data file
+    if deleted_count > 0:
+        write_data_to_csv()
+        status_label.config(text=f"Deleted {deleted_count} stop(s) and auto-saved.", anchor=tk.W, foreground="darkgreen")
+        
+        # 4. Clear input fields if no more data remains or select the next stop
+        if not delivery_data:
+            # Clear all input widgets
+            for key, widget in input_widgets.items():
+                if isinstance(widget, ttk.Combobox):
+                    widget.set('')
+                elif isinstance(widget, ttk.Entry):
+                    widget.delete(0, tk.END)
+                elif isinstance(widget, ColorDropdown):
+                    widget.set(ColorDropdown.EMPTY_VALUE)
+                elif isinstance(widget, tk.Text):
+                    widget.delete('1.0', tk.END)
+                    
+            status_label.config(text="All data deleted. File is empty and auto-saved.", anchor=tk.W, foreground="orange")
+        else:
+            # Select the item that replaced the first deleted item (which is now at the smallest index)
+            try:
+                # Find the next item to select. If there's data left, select the first visible item.
+                next_item = tree.get_children()[0] 
+                tree.selection_set(next_item)
+                on_tree_select(None)
+            except IndexError:
+                # Should not happen if delivery_data is not empty
+                pass
             
 # --- Helper function for adding the Operator Comments text area ---
 def add_comment_text_area(parent, row_idx, label_text):
@@ -1161,7 +1222,7 @@ def show_data_summary():
     Generates a summary report popup based on the aggregated data.
     """
     if not delivery_data:
-        status_label.config(text="No data to summarize. Please load a CSV first.")
+        status_label.config(text="No data to summarize. Please load a CSV first.", anchor=tk.W)
         return
         
     total_deliveries = len(delivery_data)
@@ -1316,26 +1377,31 @@ def show_data_summary():
 
 
 def copy_data():
-    """Copies data from the currently selected row to the clipboard."""
+    """Copies data from the currently selected row (only if one is selected) to the clipboard."""
     global copied_data
     selected_items = tree.selection()
+    
     if not selected_items:
-        status_label.config(text="Please select a row to copy.")
+        status_label.config(text="Please select one row to copy.", anchor=tk.W, foreground="red")
+        return
+        
+    if len(selected_items) > 1:
+        status_label.config(text="Copy failed. Please select ONLY ONE stop to copy data from.", anchor=tk.W, foreground="red")
         return
     
     item_index = tree.index(selected_items[0])
     copied_data = delivery_data[item_index].copy()
-    status_label.config(text="Data copied successfully.")
+    status_label.config(text="Data copied successfully.", anchor=tk.W)
     
 def paste_data():
     """Pasts the copied data to all currently selected rows."""
     global selected_row_id
     if not copied_data:
-        status_label.config(text="No data to paste. Please copy a row first.")
+        status_label.config(text="No data to paste. Please copy a row first.", anchor=tk.W)
         return
     selected_items = tree.selection()
     if not selected_items:
-        status_label.config(text="Please select one or more rows to paste into.")
+        status_label.config(text="Please select one or more rows to paste into.", anchor=tk.W)
         return
     
     num_pasted = 0
@@ -1364,7 +1430,7 @@ def paste_data():
         first_item_index = tree.index(selected_items[0])
         populate_input_fields(delivery_data[first_item_index])
     
-    status_label.config(text=f"Data pasted to {num_pasted} row(s).")
+    status_label.config(text=f"Data pasted to {num_pasted} row(s).", anchor=tk.W)
     
     # --- AUTO-SAVE AFTER DATA PASTE ---
     write_data_to_csv()
@@ -1373,11 +1439,11 @@ def paste_data():
 def create_input_widgets():
     """
     Creates the input widgets based on field_map.
-    MODIFIED: Operator Comments now saves on <KeyRelease>.
     """
     global input_widgets
     row_count = 0
     
+    # Widgets are now created in scrollable_frame, not right_pane
     for field_name, details in field_map.items():
         # Create an outer frame to hold the focus highlight
         field_frame = ttk.Frame(input_widgets_frame, style="TFrame")
@@ -1457,28 +1523,37 @@ def create_input_widgets():
 def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=True):
     """
     Fetches and displays a Street View image. If heading is None, relies on the API's default.
+    Fix: Uses fixed MIN_IMAGE_WIDTH/HEIGHT to ensure square aspect ratio and stability.
     """
-    global street_view_image_label, current_street_view_url, current_heading
+    global street_view_image_label, current_street_view_url, current_heading, MIN_IMAGE_WIDTH, MIN_IMAGE_HEIGHT
     
-    if not google_api_key or google_api_key == "YOUR_API_KEY_HERE":
-        status_label.config(text="Error: Please set your actual Google Maps Street View API Key.", foreground="red")
+    # NOTE: The 'google_api_key' check now correctly uses the global variable.
+    if not google_api_key or google_api_key == "":
+        status_label.config(text="ERROR: Google Maps API key is invalid or missing. Please update it.", anchor=tk.W, foreground="red")
+        # Display generic gray box instead of making API call with invalid key
+        # Create a blank image to avoid previous exception handling
+        try:
+            img_pil = Image.new('RGB', (MIN_IMAGE_WIDTH, MIN_IMAGE_HEIGHT), color = 'gray')
+            img_tk = ImageTk.PhotoImage(img_pil)
+            street_view_image_label.configure(image=img_tk, text="API Key Invalid. Check Console.", compound="center", foreground="red")
+            street_view_image_label.image = img_tk
+        except Exception:
+            pass # Fails silently if PIL isn't fully working
         return
         
-    current_street_view_url = f"https://www.google.com/maps/search/?api=1&query={requests.utils.quote(address)}"
+    current_street_view_url = f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={requests.utils.quote(address)}&heading={int(current_heading)}&fov={int(fov)}"
     
     # 1. Determine size for display (max size to request from API for quality)
     max_request_width = 1000
     max_request_height = 800
     
+    # --- FIX: Use FIXED square dimensions for the display target ---
+    display_width = MIN_IMAGE_WIDTH
+    display_height = MIN_IMAGE_HEIGHT 
+    # -----------------------------------------------------------------
+
     # Get the actual size of the display label for resizing the final image
     root.update_idletasks()
-    try:
-        display_width = street_view_image_label.winfo_width()
-        display_height = street_view_image_label.winfo_height()
-        if display_width < 100 or display_height < 100: 
-             display_width, display_height = 400, 300 # Fallback 
-    except Exception:
-        display_width, display_height = 400, 300 # Fallback 
         
     # 2. Prepare parameters
     params = {
@@ -1489,27 +1564,36 @@ def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=Tr
         "pitch": 0,
     }
     
-    # 3. Cache key (includes max requested size for uniqueness)
+    # 3. Cache key 
     if heading is not None:
         params["heading"] = int(heading)
-        cache_key = f"{address}_{heading:.2f}_{fov}_{max_request_width}x{max_request_height}" 
+        cache_key = f"{address}_{int(heading)}_{fov}" 
     else:
-        # Note: When heading is None, the actual heading determined by the API must be stored
-        cache_key = f"{address}_default_{fov}_{max_request_width}x{max_request_height}" 
+        cache_key = f"{address}_default_{fov}" 
         
     # 4. Check cache
     if cache_result and cache_key in image_cache:
-        img_tk_cached = image_cache[cache_key]['tk_img']
+        # Retrieve the original PIL image from the cache (before resizing)
+        img_pil_cached = image_cache[cache_key]['pil_img']
         
-        if image_cache[cache_key]['width'] == display_width and image_cache[cache_key]['height'] == display_height:
-            street_view_image_label.configure(image=img_tk_cached)
-            street_view_image_label.image = img_tk_cached
-            
-            status_label.config(text=f"Image loaded from cache. (FOV: {fov}). Click image to open in browser.", foreground="green")
-            return
+        # --- RESIZE CACHED IMAGE TO CURRENT FIXED DISPLAY SIZE ---
+        img_width, img_height = img_pil_cached.size
+        ratio = min(display_width / img_width, display_height / img_height)
+        new_width = int(img_width * ratio)
+        new_height = int(img_height * ratio)
+
+        img_pil_resized = img_pil_cached.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        img_tk = ImageTk.PhotoImage(img_pil_resized)
+        
+        street_view_image_label.configure(image=img_tk, text="", compound="none")
+        street_view_image_label.image = img_tk
+        # ---------------------------------------------------
+
+        status_label.config(text=f"Image loaded from cache. (H: {int(current_heading)}°, FOV: {fov}). Click image to open in browser.", anchor=tk.W, foreground="green")
+        return
 
     # Status message before API call
-    status_label.config(text=f"Fetching image from API for '{address}' (FOV: {fov})...", foreground="blue")
+    status_label.config(text=f"Fetching image from API for '{address}' (FOV: {fov})....", anchor=tk.W, foreground="blue")
     
     # 5. Fetch image
     url = "https://maps.googleapis.com/maps/api/streetview"
@@ -1520,11 +1604,10 @@ def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=Tr
         # 6. Extract the heading from the response headers if not provided
         if heading is None:
             header_content = response.headers.get('X-Google-Imagery-Content-Type', '')
-            if 'heading=' in header_content:
+            match = re.search(r'heading=([\d.]+)', header_content)
+            if match:
                 try:
-                    start = header_content.index('heading=') + 8
-                    end = header_content.index(',', start)
-                    auto_heading = float(header_content[start:end])
+                    auto_heading = float(match.group(1))
                     current_heading = auto_heading
                 except Exception:
                     current_heading = 0 
@@ -1534,7 +1617,7 @@ def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=Tr
         image_data = response.content
         img_pil = Image.open(io.BytesIO(image_data))
         
-        # 7. Resize image to fit the label area (preserving aspect ratio)
+        # 7. Resize image to fit the fixed area (preserving aspect ratio)
         img_width, img_height = img_pil.size
         
         # Calculate fit size
@@ -1542,26 +1625,51 @@ def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=Tr
         new_width = int(img_width * ratio)
         new_height = int(img_height * ratio)
 
-        img_pil = img_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        img_pil_resized = img_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
         
-        img_tk = ImageTk.PhotoImage(img_pil)
+        img_tk = ImageTk.PhotoImage(img_pil_resized)
         
-        street_view_image_label.configure(image=img_tk)
+        street_view_image_label.configure(image=img_tk, text="", compound="none")
         street_view_image_label.image = img_tk # Keep a reference
         
         if cache_result:
+             # Cache the original, full-size PIL image for subsequent resizing
              image_cache[cache_key] = {
-                 'tk_img': img_tk, 
-                 'width': new_width, 
-                 'height': new_height
+                 'pil_img': img_pil, 
              }
         
-        status_label.config(text=f"Image fetched (API Call). (H: {int(current_heading)}°, FOV: {fov}). Click image to open in browser.", foreground="black")
+        status_label.config(text=f"Image fetched (API Call). (H: {int(current_heading)}°, FOV: {fov}). Click image to open in browser.", anchor=tk.W, foreground="black")
         
     except requests.exceptions.HTTPError as e:
-        status_label.config(text=f"API Error: {e.response.text}", foreground="red")
+        # This catches 400 errors (like API key invalid/quota exceeded)
+        error_text = f"API Error: The Google Maps Platform server rejected your request. The provided API key is invalid."
+        
+        # Check if the error response text is available and more specific
+        try:
+             response_text = e.response.text
+             if "API key is invalid" in response_text or "Key is missing" in response_text:
+                 # Use the default invalid key message
+                 pass 
+             elif "quota" in response_text:
+                 error_text = "API Error: Google Maps Quota Exceeded. Please check billing/limits."
+             else:
+                 error_text = f"API Error: {e.response.text.split('.')[0]}."
+        except Exception:
+             pass
+
+        status_label.config(text=error_text, anchor=tk.W, foreground="red")
+        
+        # Display generic gray box on failure
+        try:
+            img_pil = Image.new('RGB', (MIN_IMAGE_WIDTH, MIN_IMAGE_HEIGHT), color = 'darkgray')
+            img_tk = ImageTk.PhotoImage(img_pil)
+            street_view_image_label.configure(image=img_tk, text="Image Failed to Load.", compound="center", foreground="white")
+            street_view_image_label.image = img_tk
+        except Exception:
+            pass
+            
     except Exception as e:
-        status_label.config(text=f"An error occurred fetching image: {e}", foreground="red")
+        status_label.config(text=f"An error occurred fetching image: {e}", anchor=tk.W, foreground="red")
 
 def open_browser_link(event):
     """Opens the globally stored Street View URL in the default web browser."""
@@ -1569,11 +1677,11 @@ def open_browser_link(event):
     if current_street_view_url:
         try:
             webbrowser.open(current_street_view_url, new=2)
-            status_label.config(text="Opened Street View link in browser.", foreground="blue")
+            status_label.config(text="Opened Street View link in browser.", anchor=tk.W, foreground="blue")
         except Exception as e:
-            status_label.config(text=f"Error opening browser: {e}", foreground="red")
+            status_label.config(text=f"Error opening browser: {e}", anchor=tk.W, foreground="red")
     else:
-        status_label.config(text="No valid Street View URL to open.", foreground="red")
+        status_label.config(text="No valid Street View URL to open.", anchor=tk.W, foreground="red")
 
 
 # -------------------------------------------------------------------
@@ -1596,8 +1704,15 @@ style.map('Treeview',
 )
 style.configure("Treeview", rowheight=30) 
 
+# --- ROOT WINDOW GRID SETUP ---
+root.grid_rowconfigure(0, weight=1) # Main content (paned window) row expands
+root.grid_rowconfigure(1, weight=0) # Status bar row is fixed height
+root.grid_columnconfigure(0, weight=1) # Single column expands
+# ------------------------------
+
 main_paned_window = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
-main_paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+# Use grid to place the paned window in the expandable row 0
+main_paned_window.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 0)) 
 
 left_pane = ttk.Frame(main_paned_window, padding="0 0 10 0") 
 left_pane.grid_columnconfigure(0, weight=1)
@@ -1605,8 +1720,7 @@ left_pane.grid_rowconfigure(1, weight=1)
 
 right_pane = ttk.Frame(main_paned_window, padding="10 0 0 0") 
 right_pane.grid_columnconfigure(0, weight=1)
-right_pane.grid_rowconfigure(0, weight=0) 
-right_pane.grid_rowconfigure(1, weight=100) 
+right_pane.grid_rowconfigure(0, weight=1) # The canvas will take all vertical space
 
 main_paned_window.add(left_pane, weight=1)
 main_paned_window.add(right_pane, weight=1)
@@ -1630,12 +1744,16 @@ copy_button.pack(side=tk.LEFT, padx=(10, 0))
 paste_button = ttk.Button(control_frame, text="Paste Data", command=paste_data)
 paste_button.pack(side=tk.LEFT, padx=(10, 0))
 
-status_label = ttk.Label(control_frame, text="Select a CSV file to get started.")
-status_label.pack(side=tk.LEFT, padx=(10, 0))
+# --- DELETE BUTTON ---
+delete_button = ttk.Button(control_frame, text="Delete Stop", command=delete_selected_stop)
+delete_button.pack(side=tk.LEFT, padx=(10, 0))
+# ---------------------
 
 columns = ("ID in the Route", "Address")
 tree = ttk.Treeview(left_pane, columns=columns, show="headings")
-tree.heading("ID in the Route", text="ID in the Route")
+# --- UPDATED HEADING FOR STOP NUMBER ---
+tree.heading("ID in the Route", text="Stop #") 
+# ---------------------------------------
 tree.heading("Address", text="Address")
 tree.column("ID in the Route", width=120, anchor=tk.CENTER)
 tree.column("Address", width=300)
@@ -1654,17 +1772,82 @@ scrollbar.grid(row=1, column=1, sticky="ns")
 tree.bind("<<TreeviewSelect>>", on_tree_select)
 
 # --- RIGHT PANE (Inputs and Image) ---
-input_widgets_frame = ttk.Frame(right_pane)
-input_widgets_frame.grid(row=0, column=0, sticky="nsew")
+# Create a Canvas for scrolling
+canvas = tk.Canvas(right_pane)
+canvas.grid(row=0, column=0, sticky="nsew")
+
+# Create a Scrollbar and link it to the canvas
+scrollbar_right_pane = ttk.Scrollbar(right_pane, orient="vertical", command=canvas.yview)
+scrollbar_right_pane.grid(row=0, column=1, sticky="ns")
+canvas.configure(yscrollcommand=scrollbar_right_pane.set)
+
+# Create a frame inside the canvas to hold the actual content
+scrollable_frame = ttk.Frame(canvas)
+
+# Place the scrollable_frame inside the canvas
+# The width will be managed by on_canvas_configure
+canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+# --- MOUSE WHEEL SCROLLING LOGIC ---
+def _on_mouse_wheel(event):
+    """Scrolls the canvas based on mouse wheel movement."""
+    # Determine the scroll direction/amount based on the platform
+    if event.delta: # Windows/macOS
+        # Scroll 5 units up or down (negative for up, positive for down)
+        delta = -1 * (event.delta // 120) * 5
+    elif event.num == 4: # Linux scroll up
+        delta = -1 * 5
+    elif event.num == 5: # Linux scroll down
+        delta = 1 * 5
+    else:
+        return
+        
+    canvas.yview_scroll(delta, "units")
+    
+# Bind the mouse wheel events to the canvas's parent to catch events when over any child widget
+canvas.bind_all("<MouseWheel>", _on_mouse_wheel) # Windows/macOS
+canvas.bind_all("<Button-4>", _on_mouse_wheel)   # Linux scroll up
+canvas.bind_all("<Button-5>", _on_mouse_wheel)   # Linux scroll down
+# --- END MOUSE WHEEL SCROLLING LOGIC ---
+
+
+# Configure the canvas scroll region and the frame's width
+def on_canvas_configure(event):
+    # Update the scroll region of the canvas
+    canvas.configure(scrollregion=canvas.bbox("all"))
+    # Ensure the scrollable frame's width matches the canvas's width
+    # event.width is the current width of the canvas
+    canvas.itemconfig(canvas_window, width=event.width)
+
+canvas.bind("<Configure>", on_canvas_configure)
+
+# Bind a function to the scrollable_frame's size changes to update scrollregion
+def on_frame_configure(event):
+    canvas.configure(scrollregion=canvas.bbox("all"))
+
+scrollable_frame.bind("<Configure>", on_frame_configure)
+
+
+# --- OLD WIDGETS GO INTO THE scrollable_frame ---
+input_widgets_frame = ttk.Frame(scrollable_frame) # Change parent to scrollable_frame
+input_widgets_frame.grid(row=0, column=0, sticky="ew") 
 create_input_widgets()
 
-street_view_image_frame = ttk.Frame(right_pane, padding=5)
-street_view_image_frame.grid(row=1, column=0, sticky="nsew")
-street_view_image_frame.grid_columnconfigure(0, weight=1)
-street_view_image_frame.grid_rowconfigure(0, weight=1)
+# --- Image Frame setup for fixed size, left-aligned image ---
+street_view_image_frame = ttk.Frame(scrollable_frame, padding=5) # Change parent to scrollable_frame
+street_view_image_frame.grid(row=1, column=0, sticky="nw", pady=(10, 0)) 
 
-street_view_image_label = ttk.Label(street_view_image_frame, text="Street View Preview\n\nScroll to Zoom | Right Click to Pan", background="gray", cursor="hand2")
-street_view_image_label.grid(row=0, column=0, sticky="nsew")
+street_view_image_frame.grid_columnconfigure(0, weight=0) 
+street_view_image_frame.grid_rowconfigure(0, weight=0) 
+
+street_view_image_label = ttk.Label(
+    street_view_image_frame, 
+    text="Street View Preview\n\nScroll to Zoom | Right Click to Pan", 
+    background="gray", 
+    cursor="hand2",
+    width=MIN_IMAGE_WIDTH // 8
+)
+street_view_image_label.grid(row=0, column=0, sticky="w") 
 
 street_view_image_label.bind("<Button-1>", open_browser_link)
 street_view_image_label.bind("<Button-4>", zoom_image)
@@ -1674,20 +1857,43 @@ street_view_image_label.bind("<Button-3>", start_pan)
 street_view_image_label.bind("<B3-Motion>", do_pan)
 street_view_image_label.bind("<ButtonRelease-3>", stop_pan)
 
-def resize_handler(event):
-    if current_address_for_image and event.widget == street_view_image_label:
-        fetch_and_display_street_view(current_address_for_image, current_heading, current_fov, cache_result=False)
 
-street_view_image_label.bind("<Configure>", resize_handler)
+# ----------------------------------------------------------------------------------
+# --- STATUS BAR AND VERSION LABEL (MOVED TO BOTTOM OF ROOT) ---
 
+# 1. Create the new status label (using a Frame/Label combination for alignment)
+# We use a Label here directly for simplicity, but anchor it West (left)
+status_label = tk.Label(
+    root, 
+    text="Select a CSV file to get started.", 
+    anchor=tk.W, 
+    background='lightgray', 
+    padx=10, # Add horizontal padding
+    pady=2, # Add vertical padding
+    relief=tk.SUNKEN # Give it a status bar look
+)
 
-# --- VERSION LABEL (Added to the root window) ---
-version_label = tk.Label(root, text=f"v{APP_VERSION}", font=("TkDefaultFont", 8), fg="gray")
-version_label.pack(side=tk.RIGHT, padx=5, pady=2)
+# 2. Place it in the bottom row (row 1) of the root window's grid
+status_label.grid(row=1, column=0, sticky="ew")
+
+# 3. Create/Relocate the version label inside the status_label
+version_label = tk.Label(status_label, text=f"v{APP_VERSION}", font=("TkDefaultFont", 8), fg="gray", background='lightgray')
+version_label.pack(side=tk.RIGHT, padx=5) # Use pack inside the status_label to push it right
+
+# ----------------------------------------------------------------------------------
+
+# --- BIND KEYBOARD SHORTCUTS FOR COPY/PASTE ---
+# Binds Ctrl+c (Windows/Linux) and Command+c (macOS) to copy_data
+root.bind('<Control-c>', lambda e: copy_data())
+root.bind('<Command-c>', lambda e: copy_data())
+
+# Binds Ctrl+v (Windows/Linux) and Command+v (macOS) to paste_data
+root.bind('<Control-v>', lambda e: paste_data())
+root.bind('<Command-v>', lambda e: paste_data())
+# ----------------------------------------------
+
 # ------------------------------------------------
-
-# ------------------------------------------------
-# NEW: CHECK FOR UPDATES ON STARTUP
+# CHECK FOR UPDATES ON STARTUP
 # ------------------------------------------------
 check_for_update()
 
