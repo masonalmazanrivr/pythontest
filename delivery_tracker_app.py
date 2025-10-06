@@ -11,6 +11,8 @@ from google import genai
 from google.genai.errors import APIError
 from io import StringIO
 import math
+import os
+import tempfile 
 
 # -------------------------------------------------------------------
 # Global state and API Keys
@@ -23,6 +25,9 @@ copied_data = {}
 current_street_view_url = "" 
 image_cache = {}
 street_view_image_label = None
+
+# NEW GLOBAL VARIABLE FOR AUTO-SAVE
+auto_save_filepath = None 
 
 # IMAGE INTERACTION GLOBALS
 current_address_for_image = ""
@@ -418,6 +423,92 @@ class ColorDropdown(tk.Frame):
         return self.value
 
 # -------------------------------------------------------------------
+# Auto-Save and Export Logic
+# -------------------------------------------------------------------
+
+def initialize_auto_save_file(date, robot_id, source_name):
+    """
+    Sets the global auto_save_filepath to a file in the user's home/temp directory 
+    and writes the initial header.
+    """
+    global auto_save_filepath
+    
+    # Create a unique filename based on date and robot ID
+    filename = f"autosave_report_{date.replace('/', '-')}_{robot_id}_{datetime.now().strftime('%H%M%S')}.csv"
+    
+    # Use a directory inside the user's home or a system temporary directory
+    # For simplicity and cross-platform compatibility, let's use a temp directory
+    save_dir = tempfile.gettempdir()
+    
+    auto_save_filepath = os.path.join(save_dir, filename)
+    
+    # Write the header row
+    try:
+        template_headers = list(field_map.keys())
+        with open(auto_save_filepath, 'w', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=template_headers)
+            writer.writeheader()
+        
+        status_label.config(text=f"Loaded {len(delivery_data)} stops from '{source_name}'. Auto-saving to: {auto_save_filepath}", foreground="black")
+    
+    except Exception as e:
+        status_label.config(text=f"Error initializing auto-save file: {e}", foreground="red")
+        auto_save_filepath = None # Disable auto-save if initialization fails
+        
+def write_data_to_csv():
+    """
+    Overwrites the entire CSV file with the current state of delivery_data.
+    This is called by save_data on every change.
+    """
+    global auto_save_filepath
+    if not delivery_data or not auto_save_filepath:
+        return
+        
+    try:
+        template_headers = list(field_map.keys())
+        with open(auto_save_filepath, 'w', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=template_headers)
+            writer.writeheader()
+            writer.writerows(delivery_data)
+            
+        # Optional: Add a subtle status update, but avoid spamming the status bar
+        # status_label.config(text=f"Data auto-saved.", foreground="darkgreen")
+        
+    except Exception as e:
+        # Crucial to alert user if auto-save fails
+        status_label.config(text=f"CRITICAL AUTO-SAVE ERROR: {e}", foreground="red")
+
+
+def export_csv_file():
+    """Exports all current data to a CSV file."""
+    if not delivery_data:
+        status_label.config(text="No data to export. Please load data first.")
+        return
+        
+    # Suggest the autosave path as the default save location and name
+    initialdir = os.path.dirname(auto_save_filepath) if auto_save_filepath else os.getcwd()
+    initialfile = os.path.basename(auto_save_filepath) if auto_save_filepath else "report_final.csv"
+
+    filepath = filedialog.asksaveasfilename(
+        defaultextension=".csv",
+        filetypes=[("CSV files", "*.csv")],
+        title="Save Report As",
+        initialdir=initialdir,
+        initialfile=initialfile
+    )
+    if filepath:
+        try:
+            # We already have a function to write the data, so just use it.
+            template_headers = list(field_map.keys())
+            with open(filepath, 'w', newline='') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=template_headers)
+                writer.writeheader()
+                writer.writerows(delivery_data)
+            status_label.config(text=f"Final Report saved to '{filepath.split('/')[-1]}'")
+        except Exception as e:
+            status_label.config(text=f"An error occurred while exporting: {e}")
+
+# -------------------------------------------------------------------
 # Core Application Functions
 # -------------------------------------------------------------------
 
@@ -560,8 +651,57 @@ def show_image_to_csv_popup(date, robot_id):
     generate_button = ttk.Button(popup_frame, text="Generate & Continue", command=generate_and_continue, state=tk.DISABLED)
     generate_button.pack()
 
+def check_csv_for_report_details(filepath):
+    """
+    Checks the first 5 rows of an existing CSV for consistent 'Date' and 'Robot ID'.
+    Returns (Date, Robot ID) if valid and consistent, otherwise (None, None).
+    """
+    date_val, robot_id_val = None, None
+    found_data = False
+    
+    try:
+        with open(filepath, 'r', newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
+            
+            # Check the first few rows for consistency
+            for i, row in enumerate(reader):
+                if i >= 5: # Only check the first 5 rows
+                    break
+                
+                current_date = row.get("Date", "").strip()
+                current_robot_id = row.get("Robot ID", "").strip()
+                
+                if not current_date and not current_robot_id:
+                    continue
+                
+                if not found_data:
+                    # First row with data sets the baseline
+                    date_val = current_date
+                    robot_id_val = current_robot_id
+                    found_data = True
+                else:
+                    # Check for consistency with the baseline
+                    if date_val != current_date or robot_id_val != current_robot_id:
+                        # Inconsistent data means we must prompt the user
+                        return None, None
+            
+        # If we found consistent data and the values are not empty
+        if found_data and date_val and robot_id_val:
+            return date_val, robot_id_val
+        
+        # If headers exist but data is empty, or no data was found
+        return None, None
+        
+    except Exception:
+        # If the file can't be read or headers are missing, default to prompting
+        return None, None
+
+
 def choose_csv_file():
-    """Menu to choose between loading an existing CSV or generating from an image."""
+    """
+    Menu to choose between loading an existing CSV or generating from an image.
+    MODIFIED: Now checks CSV content and skips the confirmation prompt if details are found.
+    """
     popup = tk.Toplevel(root)
     popup.title("Load Data Option")
     popup.grab_set()
@@ -577,7 +717,15 @@ def choose_csv_file():
             filetypes=[("CSV files", "*.csv")]
         )
         if filepath:
-            show_confirmation_popup(filepath)
+            date, robot_id = check_csv_for_report_details(filepath)
+            
+            if date and robot_id:
+                # SKIP PROMPT: Start data load directly with extracted values
+                status_label.config(text=f"Report details found in CSV. Loading data...", foreground="darkgreen")
+                start_data_load(filepath, date, robot_id)
+            else:
+                # SHOW PROMPT: Report details were missing or inconsistent
+                show_confirmation_popup(filepath)
             
     def select_generate_from_image():
         popup.destroy()
@@ -594,6 +742,7 @@ def show_confirmation_popup(filepath=None, is_image_mode=False):
     popup_frame = ttk.Frame(popup, padding=20)
     popup_frame.pack(fill=tk.BOTH, expand=True)
 
+    # Note: The image shows DD/MM/YYYY, so we stick with that format.
     date_label = ttk.Label(popup_frame, text="Date (DD/MM/YYYY):")
     date_label.pack(pady=(0, 5))
     date_entry = ttk.Entry(popup_frame)
@@ -671,6 +820,8 @@ def start_data_load(source, date, robot_id, is_content=False):
                 if key in new_row:
                     new_row[key] = value
             
+            # OVERWRITE with the provided/extracted date and robot_id for consistency 
+            # and to fill missing columns.
             new_row['Date'] = date
             new_row['Robot ID'] = robot_id
             
@@ -710,11 +861,17 @@ def start_data_load(source, date, robot_id, is_content=False):
             
         if not is_content: csvfile.close()
 
-        status_label.config(text=f"Loaded {len(delivery_data)} stops from '{source_name}'. {rows_skipped} duplicates skipped.", foreground="black")
+        # --- AUTO-SAVE INITIALIZATION ---
+        initialize_auto_save_file(date, robot_id, source_name)
+        # ------------------------------------
+
         if delivery_data:
             populate_input_fields(delivery_data[0])
             tree.selection_set(tree.get_children()[0])
             on_tree_select(None) 
+            # Initial write of the loaded data
+            write_data_to_csv()
+            
     except Exception as e:
         status_label.config(text=f"An error occurred loading data: {e}", foreground="red")
         if 'csvfile' in locals() and not is_content:
@@ -867,6 +1024,9 @@ def save_data(field_name_changed=None):
                     delivery_data[first_selected_index][key] = widget.get()
                 elif isinstance(widget, tk.Text):
                     delivery_data[first_selected_index][key] = widget.get('1.0', tk.END).strip()
+             
+             # If using the fallback, we still need to auto-save
+             write_data_to_csv()
              return
 
 
@@ -890,28 +1050,11 @@ def save_data(field_name_changed=None):
         
     if current_field_name:
         status_label.config(text=f"Updated '{current_field_name}' for {len(selected_items)} item(s).")
+    
+    # --- AUTO-SAVE AFTER DATA UPDATE ---
+    write_data_to_csv()
+    # -----------------------------------
             
-def export_csv_file():
-    """Exports all current data to a CSV file."""
-    if not delivery_data:
-        status_label.config(text="No data to export. Please load a CSV first.")
-        return
-    filepath = filedialog.asksaveasfilename(
-        defaultextension=".csv",
-        filetypes=[("CSV files", "*.csv")],
-        title="Save Report As"
-    )
-    if filepath:
-        try:
-            template_headers = list(field_map.keys())
-            with open(filepath, 'w', newline='') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=template_headers)
-                writer.writeheader()
-                writer.writerows(delivery_data)
-            status_label.config(text=f"Report saved to '{filepath.split('/')[-1]}'")
-        except Exception as e:
-            status_label.config(text=f"An error occurred while exporting: {e}")
-
 # --- Helper function for adding the Operator Comments text area ---
 def add_comment_text_area(parent, row_idx, label_text):
     """Creates a label and an expanding Text widget with a scrollbar."""
@@ -1143,10 +1286,14 @@ def paste_data():
     
     status_label.config(text=f"Data pasted to {num_pasted} row(s).")
     
+    # --- AUTO-SAVE AFTER DATA PASTE ---
+    write_data_to_csv()
+    # -----------------------------------
+    
 def create_input_widgets():
     """
     Creates the input widgets based on field_map.
-    MODIFIED: Added focus bindings (Up/Down/Tab) to all input widgets.
+    MODIFIED: Operator Comments now saves on <KeyRelease>.
     """
     global input_widgets
     row_count = 0
@@ -1172,10 +1319,13 @@ def create_input_widgets():
                 
                 widget = text_widget
                 
+                # --- KEY CHANGE: Bind to <KeyRelease> for instant saving ---
+                widget.bind("<KeyRelease>", save_data_with_field(field_name)) 
+                
                 # --- Keyboard navigation for Text widget ---
                 widget.bind("<FocusIn>", lambda e: apply_focus_style(e, True))
-                # Save data on FocusOut
-                widget.bind("<FocusOut>", lambda e: (save_data_with_field(field_name)(e), apply_focus_style(e, False)))
+                # FocusOut is now only for visual style, saving is done on KeyRelease
+                widget.bind("<FocusOut>", lambda e: apply_focus_style(e, False)) 
                 widget.bind("<Up>", focus_next_widget)
                 widget.bind("<Down>", focus_next_widget)
                 widget.bind("<Tab>", focus_next_widget)
