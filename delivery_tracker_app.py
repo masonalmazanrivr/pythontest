@@ -13,8 +13,8 @@ from io import StringIO
 import math
 import os
 import tempfile 
-import sys # Added for system control and script path
-import base64 # Added for decoding GitHub API content
+import re # New import for regex in update check
+from tkinter import messagebox # New import for update prompt
 
 # -------------------------------------------------------------------
 # Global state and API Keys
@@ -29,13 +29,7 @@ image_cache = {}
 street_view_image_label = None
 
 # NEW GLOBAL VERSION DEFINITION
-# NOTE: This value must be manually updated in the local file when development changes.
-APP_VERSION = "25.10.3" 
-
-# GitHub API URL pointing directly to the file content
-# This URL is used to check the version AND to fetch the file contents.
-GITHUB_SCRIPT_URL = "https://api.github.com/repos/masonalmazanrivr/pythontest/contents/delivery_tracker_app.py"
-
+APP_VERSION = "25.10.4"
 
 # NEW GLOBAL VARIABLE FOR AUTO-SAVE
 auto_save_filepath = None 
@@ -45,6 +39,10 @@ current_address_for_image = ""
 current_heading = 0
 current_fov = 90
 last_mouse_x = 0
+
+# NEW CONSTANT: URL for the raw content of the Python file on your GitHub repository
+# UPDATED FOR YOUR REPO: masonalmazanrivr/pythontest
+GITHUB_RAW_FILE_URL = "https://raw.githubusercontent.com/masonalmazanrivr/pythontest/main/delivery_tracker_app.py" 
 
 # NOTE: REPLACE THESE WITH YOUR ACTUAL KEYS!
 google_api_key = "AIzaSyBKE225e5Eq4tEyAPqJXO_Hd5grSeoYcqc" # Google Maps Street View API Key
@@ -520,131 +518,77 @@ def export_csv_file():
             status_label.config(text=f"An error occurred while exporting: {e}")
 
 # -------------------------------------------------------------------
-# Version Check Logic (MODIFIED FOR DIRECT GITHUB API FETCH)
+# Update Check Logic (NEW SECTION)
 # -------------------------------------------------------------------
 
-def download_and_replace_script(popup):
-    """
-    Downloads the new script content from GitHub API, decodes it, and overwrites the current running file.
-    """
-    script_path = os.path.abspath(sys.argv[0])
-    
-    if GITHUB_SCRIPT_URL == "https://api.github.com/repos/masonalmazanrivr/pythontest/contents/delivery_tracker_app.py":
-         # This check is just a placeholder to ensure the user has customized the URL,
-         # but since you've provided the exact URL, we can treat it as valid.
-         pass 
+def parse_version(version_str):
+    """Parses a version string (e.g., '25.10.4') into a comparable tuple of integers."""
+    # Ensure only digits and dots are considered, then split and convert to int
+    clean_version = re.sub(r'[^\d.]', '', version_str)
+    try:
+        return tuple(map(int, clean_version.split('.')))
+    except ValueError:
+        return (0, 0, 0) # Fallback if parsing fails
 
-    status_label.config(text="Downloading update...", foreground="blue")
-    root.update()
+def check_for_update():
+    """
+    Checks the GitHub repository's main file for a newer version.
+    """
+    # 1. Get current version
+    current_version_tuple = parse_version(APP_VERSION)
     
     try:
-        # 1. Fetch the GitHub API JSON response
-        response = requests.get(GITHUB_SCRIPT_URL, timeout=10)
+        # 2. Fetch the raw content of the app file from GitHub
+        response = requests.get(GITHUB_RAW_FILE_URL, timeout=5)
         response.raise_for_status()
         
-        data = response.json()
+        file_content = response.text
+        latest_version = None
         
-        if data.get('encoding') != 'base64' or not data.get('content'):
-            status_label.config(text="Update failed: GitHub API response structure is unexpected.", foreground="red")
-            popup.destroy()
-            return
-            
-        # 2. Decode the Base64 content to get the script text
-        base64_content = data['content'].replace('\n', '')
-        new_script_content = base64.b64decode(base64_content).decode('utf-8')
-
-        # 3. Overwrite the running script file
-        with open(script_path, 'w', encoding='utf-8') as f:
-            f.write(new_script_content)
+        # 3. Search for the APP_VERSION line in the file content
+        # Pattern looks for 'APP_VERSION = "X.Y.Z"'
+        match = re.search(r'APP_VERSION\s*=\s*["\'](\d+\.\d+\.\d+)["\']', file_content)
         
-        popup.destroy()
-        status_label.config(text="Update downloaded successfully! Please RESTART the application to apply changes.", foreground=RED)
-        
-    except requests.exceptions.RequestException as e:
-        status_label.config(text=f"Download failed: Connection or GitHub API error. ({e})", foreground="red")
-        popup.destroy()
-    except Exception as e:
-        status_label.config(text=f"Update failed: Cannot write to file. Check file permissions. ({e})", foreground="red")
-        popup.destroy()
-
-
-def check_for_updates():
-    """Fetches the latest version from GitHub API and prompts the user if an update is available."""
-    
-    def version_tuple(v):
-        """Converts a version string (e.g., '25.10.3') to a comparable tuple."""
-        clean_v = ''.join(c for c in v.strip() if c.isdigit() or c == '.')
-        try:
-            return tuple(map(int, clean_v.split('.')))
-        except ValueError:
-            return (0, 0, 0)
-
-    status_label.config(text="Checking for updates...", foreground="blue")
-    root.update()
-
-    try:
-        # 1. Fetch the GitHub API JSON response
-        response = requests.get(GITHUB_SCRIPT_URL, timeout=5)
-        response.raise_for_status()
-        
-        data = response.json()
-        
-        if data.get('encoding') != 'base64' or not data.get('content'):
-            status_label.config(text="Update check failed: GitHub API response structure is unexpected.", foreground="red")
-            return
-
-        # 2. Decode the content and search for the version string
-        base64_content = data['content'].replace('\n', '')
-        script_content = base64.b64decode(base64_content).decode('utf-8')
-        
-        # Regex search for APP_VERSION = "..."
-        import re
-        match = re.search(r'APP_VERSION\s*=\s*\"(.*?)\"', script_content)
-        
-        if not match:
-            status_label.config(text="Update check failed: Cannot find APP_VERSION string in remote script.", foreground="red")
-            return
-        
-        remote_version_str = match.group(1).strip()
-        local_version_tuple = version_tuple(APP_VERSION)
-        remote_version_tuple = version_tuple(remote_version_str)
-        
-        remote_version_display = '.'.join(map(str, remote_version_tuple))
-        
-        if remote_version_tuple > local_version_tuple:
-            status_label.config(text=f"UPDATE AVAILABLE: v{remote_version_display} (Current: v{APP_VERSION})", foreground=RED)
-            show_update_prompt(remote_version_display)
+        if match:
+            latest_version = match.group(1).strip()
+            latest_version_tuple = parse_version(latest_version)
         else:
-            status_label.config(text=f"Application is up to date (v{APP_VERSION}).", foreground=GREEN)
-
+            status_label.config(text="Error: Could not find APP_VERSION in the GitHub file.", foreground="orange")
+            return
+        
+        # 4. Compare versions
+        if latest_version_tuple > current_version_tuple:
+            # Newer version found!
+            status_label.config(text=f"Update available: v{latest_version}", foreground="red")
+            
+            # Show update prompt
+            result = messagebox.askyesno(
+                "Update Available 🚀",
+                f"A new version (v{latest_version}) is available!\n\n"
+                f"Your current version: v{APP_VERSION}\n\n"
+                "Would you like to open the GitHub repository to download the update?"
+            )
+            
+            if result:
+                # Construct the main repository URL from the raw file URL
+                parts = GITHUB_RAW_FILE_URL.split('/')
+                # parts[3] is username, parts[4] is repo name
+                project_url = f"https://github.com/{parts[3]}/{parts[4]}"
+                webbrowser.open(project_url)
+                
+        else:
+            # Only show this if data hasn't been loaded yet, or if it's the latest
+            if not delivery_data:
+                status_label.config(text=f"v{APP_VERSION} is the latest version. Select a CSV file to get started.", foreground="darkgreen")
+            
     except requests.exceptions.RequestException as e:
-        status_label.config(text=f"Update check failed: Cannot connect to GitHub. ({e})", foreground="red")
-    except Exception as e:
-        status_label.config(text=f"Update check error: {e}", foreground="red")
-
-
-def show_update_prompt(new_version):
-    """Pops up a window prompting the user to update."""
-    popup = tk.Toplevel(root)
-    popup.title("Software Update Available")
-    popup.grab_set()
-    popup_frame = ttk.Frame(popup, padding=20)
-    popup_frame.pack(fill=tk.BOTH, expand=True)
-
-    ttk.Label(popup_frame, text="A new version of the Robot Delivery Tracker is available!", font=("TkDefaultFont", 12, "bold")).pack(pady=10)
-    ttk.Label(popup_frame, text=f"Current Version: v{APP_VERSION}\nNew Version: v{new_version}", foreground="blue").pack(pady=5)
-    
-    ttk.Label(popup_frame, text="Click 'Update Now' to download the new version. You **MUST** restart the application immediately after the download is complete.").pack(pady=10)
-
-    # Modified button to perform automatic download
-    update_button = ttk.Button(popup_frame, text="Update Now", command=lambda: download_and_replace_script(popup))
-    update_button.pack(pady=10)
-
-    close_button = ttk.Button(popup_frame, text="Close", command=popup.destroy)
-    close_button.pack(pady=5)
+        print(f"Update check failed: {e}")
+        # Only show this if data hasn't been loaded yet
+        if not delivery_data:
+            status_label.config(text="Could not check for updates. Select a CSV file to get started.", foreground="orange")
 
 # -------------------------------------------------------------------
-# Core Application Functions (Remainder)
+# Core Application Functions
 # -------------------------------------------------------------------
 
 def generate_csv_from_image(image_filepaths, date, robot_id, popup_window, status_label_popup):
@@ -765,15 +709,15 @@ def show_image_to_csv_popup(date, robot_id):
             selected_filepaths = filepaths 
             
             if len(filepaths) == 1:
-                 file_path_var.set(f".../{filepaths[0].split('/')[-1]}")
+                file_path_var.set(f".../{filepaths[0].split('/')[-1]}")
             else:
-                 file_path_var.set(f"{len(filepaths)} files selected.")
-                 
+                file_path_var.set(f"{len(filepaths)} files selected.")
+                
             status_label_popup.config(text="Files selected. Click Generate.", foreground="black")
             generate_button.config(state=tk.NORMAL)
         else:
-             file_path_var.set("No files selected.")
-             status_label_popup.config(text="", foreground="black")
+            file_path_var.set("No files selected.")
+            status_label_popup.config(text="", foreground="black")
 
 
     def generate_and_continue():
@@ -914,7 +858,6 @@ def show_confirmation_popup(filepath=None, is_image_mode=False):
 def start_data_load(source, date, robot_id, is_content=False):
     """
     Loads data into the application.
-    FIXED: Implements multi-encoding handling for robust CSV file reading.
     """
     global delivery_data
     delivery_data = []
@@ -924,8 +867,6 @@ def start_data_load(source, date, robot_id, is_content=False):
     unique_rows = set()
     rows_skipped = 0 
     
-    csvfile = None # Initialize csvfile outside try/except
-    
     try:
         if is_content:
             csvfile = StringIO(source)
@@ -933,23 +874,9 @@ def start_data_load(source, date, robot_id, is_content=False):
             source_name = "Gemini Generated Data"
         else:
             filepath = source
+            csvfile = open(filepath, 'r', newline='')
+            reader = csv.DictReader(csvfile)
             source_name = filepath.split('/')[-1]
-
-            # --- START ENCODING FIX ---
-            try:
-                # Attempt 1: Try UTF-8 (Python default, most common)
-                csvfile = open(filepath, 'r', newline='', encoding='utf-8')
-                reader = csv.DictReader(csvfile)
-            except UnicodeDecodeError:
-                # Attempt 2: Fallback to latin-1 (common for older exports/non-English data)
-                try:
-                    csvfile = open(filepath, 'r', newline='', encoding='latin-1')
-                    reader = csv.DictReader(csvfile)
-                except UnicodeDecodeError:
-                    # Attempt 3: Fallback to cp1252 (Windows default)
-                    csvfile = open(filepath, 'r', newline='', encoding='cp1252')
-                    reader = csv.DictReader(csvfile)
-            # --- END ENCODING FIX ---
 
         fieldnames_from_source = reader.fieldnames
         id_column_name = None
@@ -958,10 +885,12 @@ def start_data_load(source, date, robot_id, is_content=False):
             id_column_name = 'ID in the Route'
         elif 'Stop Number' in fieldnames_from_source:
             id_column_name = 'Stop Number' 
+        elif 'Stop' in fieldnames_from_source:
+            id_column_name = 'Stop' 
             
         if not id_column_name:
             status_label.config(text="Error: Data must contain 'ID in the Route' or 'Stop Number' header.", foreground="red")
-            if csvfile: csvfile.close()
+            if not is_content: csvfile.close()
             return
 
         for row in reader:
@@ -1009,8 +938,8 @@ def start_data_load(source, date, robot_id, is_content=False):
                 # --- Apply the initial success tag ---
                 apply_success_tag(item_id, success_value)
                 # ----------------------------------------
-        
-        if csvfile: csvfile.close()
+            
+        if not is_content: csvfile.close()
 
         # --- AUTO-SAVE INITIALIZATION ---
         initialize_auto_save_file(date, robot_id, source_name)
@@ -1025,7 +954,7 @@ def start_data_load(source, date, robot_id, is_content=False):
             
     except Exception as e:
         status_label.config(text=f"An error occurred loading data: {e}", foreground="red")
-        if csvfile:
+        if 'csvfile' in locals() and not is_content:
             try: csvfile.close()
             except: pass
             
@@ -1167,14 +1096,14 @@ def save_data(field_name_changed=None):
              # Fallback to update everything for the *first* selected item if the focus isn't clear
              first_selected_index = tree.index(selected_items[0])
              for key, widget in input_widgets.items():
-                if isinstance(widget, ttk.Combobox):
-                    delivery_data[first_selected_index][key] = widget.get()
-                elif isinstance(widget, ttk.Entry):
-                    delivery_data[first_selected_index][key] = widget.get()
-                elif isinstance(widget, ColorDropdown):
-                    delivery_data[first_selected_index][key] = widget.get()
-                elif isinstance(widget, tk.Text):
-                    delivery_data[first_selected_index][key] = widget.get('1.0', tk.END).strip()
+                 if isinstance(widget, ttk.Combobox):
+                     delivery_data[first_selected_index][key] = widget.get()
+                 elif isinstance(widget, ttk.Entry):
+                     delivery_data[first_selected_index][key] = widget.get()
+                 elif isinstance(widget, ColorDropdown):
+                     delivery_data[first_selected_index][key] = widget.get()
+                 elif isinstance(widget, tk.Text):
+                     delivery_data[first_selected_index][key] = widget.get('1.0', tk.END).strip()
              
              # If using the fallback, we still need to auto-save
              write_data_to_csv()
@@ -1686,7 +1615,6 @@ main_paned_window.add(right_pane, weight=1)
 control_frame = ttk.Frame(left_pane)
 control_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
 
-# Control buttons
 choose_button = ttk.Button(control_frame, text="Load Data", command=choose_csv_file)
 choose_button.pack(side=tk.LEFT)
 
@@ -1701,10 +1629,6 @@ copy_button.pack(side=tk.LEFT, padx=(10, 0))
 
 paste_button = ttk.Button(control_frame, text="Paste Data", command=paste_data)
 paste_button.pack(side=tk.LEFT, padx=(10, 0))
-
-# NEW Update Check Button
-update_button = ttk.Button(control_frame, text="Check for Update", command=check_for_updates)
-update_button.pack(side=tk.LEFT, padx=(10, 0))
 
 status_label = ttk.Label(control_frame, text="Select a CSV file to get started.")
 status_label.pack(side=tk.LEFT, padx=(10, 0))
@@ -1762,5 +1686,9 @@ version_label = tk.Label(root, text=f"v{APP_VERSION}", font=("TkDefaultFont", 8)
 version_label.pack(side=tk.RIGHT, padx=5, pady=2)
 # ------------------------------------------------
 
+# ------------------------------------------------
+# NEW: CHECK FOR UPDATES ON STARTUP
+# ------------------------------------------------
+check_for_update()
 
 root.mainloop()
