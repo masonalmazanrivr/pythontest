@@ -31,7 +31,7 @@ image_cache = {}
 street_view_image_label = None
 
 # NEW GLOBAL VERSION DEFINITION
-APP_VERSION = "25.10.5"
+APP_VERSION = "25.10.6"
 
 # NEW GLOBAL VARIABLE FOR AUTO-SAVE
 auto_save_filepath = None 
