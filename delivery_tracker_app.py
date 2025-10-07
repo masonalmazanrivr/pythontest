@@ -29,7 +29,7 @@ image_cache = {}
 street_view_image_label = None
 
 # GLOBAL VERSION DEFINITION
-APP_VERSION = "25.10.5"
+APP_VERSION = "25.10.6"
 
 # GLOBAL VARIABLE FOR AUTO-SAVE
 auto_save_filepath = None
@@ -146,49 +146,188 @@ COLOR_SCHEMES = {
 }
 
 # -------------------------------------------------------------------
+# NEW: Autofill Presets
+# -------------------------------------------------------------------
+
+# Data fields to be cleared/autofilled (all fields below 'Packages')
+AUTOFILL_FIELDS = [
+    "Success", "Soft help from Field Operator", "Field Operator physically intervened",
+    "Autonomous Return", "Order placement", "Robot health", "Connectivity",
+    "Cluttered environment", "Gated environment", "Payload addressability",
+    "Too risky to try", "Operator Comments"
+]
+
+AUTOFILL_PRESETS = {
+    # 1. SUCCESS Preset (NEW)
+    "Success": {
+        "Success": "Yes", 
+        "Soft help from Field Operator": "No help needed", 
+        "Field Operator physically intervened": "No help needed", 
+        "Autonomous Return": "Successful", 
+        "Order placement": "Good placement", 
+        "Robot health": "No faults",
+        "Connectivity": "Good connection", 
+        "Cluttered environment": "Robot fits", 
+        "Gated environment": "No gates", 
+        "Payload addressability": "Order was delivered", 
+        "Too risky to try": "Not risky", 
+        "Operator Comments": "" 
+    },
+    # 2. Clear Preset
+    "Clear": {field: "" for field in AUTOFILL_FIELDS},
+    # 3. Bad Connection Preset 
+    "Bad connection": {
+        "Success": "Skipped by robot", 
+        "Soft help from Field Operator": "N/A", 
+        "Field Operator physically intervened": "Needed help", 
+        "Autonomous Return": "Not used", 
+        "Order placement": "N/A", 
+        "Robot health": "Broken parts", 
+        "Connectivity": "Bad connection", 
+        "Cluttered environment": "N/A", 
+        "Gated environment": "No gates", 
+        "Payload addressability": "N/A", 
+        "Too risky to try": "N/A", 
+        "Operator Comments": "hand delivery, bad connection"
+    },
+    # 4. Missing Package Preset 
+    "Missing Package": {
+        "Success": "Missing", 
+        "Soft help from Field Operator": "N/A", 
+        "Field Operator physically intervened": "N/A", 
+        "Autonomous Return": "Not used", 
+        "Order placement": "N/A", 
+        "Robot health": "No faults", 
+        "Connectivity": "N/A", 
+        "Cluttered environment": "N/A", 
+        "Gated environment": "No gates", 
+        "Payload addressability": "N/A", 
+        "Too risky to try": "N/A", 
+        "Operator Comments": "Missing Package"
+    }
+}
+
+AUTOFILL_SCHEME = {
+    "Success": (GREEN, FG_ON),
+    "Missing Package": (LGRAY, FG_OFF), 
+    "Clear": (LGRAY, FG_OFF),
+    "Bad connection": (RED, FG_ON),
+}
+
+
+def autofill_data(preset_name):
+    """
+    Applies a defined preset of data to all currently selected rows and updates the UI.
+    This is triggered by the new 'Autofill' dropdown.
+    """
+    global selected_row_id
+    if not delivery_data:
+        status_label.config(text="No data loaded to autofill.", anchor=tk.W, foreground="red")
+        # Reset dropdown immediately if no data
+        autofill_dropdown.set(autofill_dropdown.EMPTY_VALUE)
+        return
+
+    preset = AUTOFILL_PRESETS.get(preset_name)
+    if not preset:
+        return
+
+    selected_items = tree.selection()
+    if not selected_items:
+        status_label.config(text="Please select one or more stops to autofill.", anchor=tk.W, foreground="orange")
+        # Reset dropdown immediately if no selection
+        autofill_dropdown.set(autofill_dropdown.EMPTY_VALUE)
+        return
+
+    # 1. Apply the data to the global delivery_data list for all selected items
+    for item in selected_items:
+        item_index = tree.index(item)
+        
+        # Apply the preset values
+        for field, value in preset.items():
+            delivery_data[item_index][field] = value
+            
+            # Special handling for Success field to update the Treeview tag
+            if field == 'Success':
+                apply_success_tag(item, value)
+
+    # 2. Update the visible input fields with the data from the first selected row
+    first_item_index = tree.index(selected_items[0])
+    populate_input_fields(delivery_data[first_item_index])
+
+    # 3. Auto-save the changes
+    write_data_to_csv()
+
+    # 4. Provide user feedback
+    status_label.config(text=f"Autofilled '{preset_name}' data for {len(selected_items)} item(s).", anchor=tk.W, foreground="darkgreen")
+    
+    # 5. Reset the dropdown to 'Autofill' after selection
+    autofill_dropdown.set(autofill_dropdown.EMPTY_VALUE)
+
+
+# -------------------------------------------------------------------
 # Focus and Navigation Logic
 # -------------------------------------------------------------------
 
 def focus_next_widget(event):
     """Moves focus to the next/previous widget in the defined order, handling Up/Down arrows."""
+    # Include the Autofill dropdown label in the focus cycle
     widgets = list(input_widgets.values())
+    
+    # Prepend the autofill dropdown label for a full cycle
+    global autofill_dropdown
+    if 'autofill_dropdown' in globals():
+        widgets.insert(0, autofill_dropdown.label)
+    
+    # Normalize widgets to their focusable element
+    focusable_widgets = []
+    for w in widgets:
+        # Check if it's the Autofill dropdown label (which is a tk.Label inside a tk.Frame)
+        if isinstance(w, tk.Label) and w.master in [getattr(w.master, 'autofill_dropdown', None)]:
+             focusable_widgets.append(w)
+        # Check if it's a regular ColorDropdown (we need its internal label)
+        elif isinstance(w, ColorDropdown):
+            focusable_widgets.append(w.label)
+        # Check if it's a direct focusable widget (Text, Entry, Combobox)
+        elif isinstance(w, (tk.Text, ttk.Entry, ttk.Combobox)):
+            focusable_widgets.append(w)
+    
+    if not focusable_widgets:
+        return
+
     try:
         # Determine the currently focused widget (or its container)
         focused = root.focus_get()
         current_widget = None
         
-        if focused in widgets:
+        if focused in focusable_widgets:
             current_widget = focused
-        elif isinstance(focused, tk.Label) and focused.master in widgets:
-            current_widget = focused.master
+        elif isinstance(focused, tk.Label) and focused.master in [w.master for w in focusable_widgets if isinstance(w, ColorDropdown.label)]:
+            # Focused on a ColorDropdown label
+            current_widget = focused
         elif isinstance(focused, tk.Text):
-            # For Text widgets, their parent (which is a Frame container) is in widgets
-            current_widget = focused.master.master
-        
+            # For Text widgets, the widget itself is focusable
+            current_widget = focused
+            
         if not current_widget:
             return
             
-        current_index = widgets.index(current_widget)
+        current_index = focusable_widgets.index(current_widget)
         
     except ValueError:
         return
 
     next_index = current_index
     if event.keysym in ('Down', 'Tab'):
-        next_index = (current_index + 1) % len(widgets)
+        next_index = (current_index + 1) % len(focusable_widgets)
     elif event.keysym == 'Up': 
-        next_index = (current_index - 1 + len(widgets)) % len(widgets)
+        next_index = (current_index - 1 + len(focusable_widgets)) % len(focusable_widgets)
         
     # Set focus to the new widget
-    next_widget = widgets[next_index]
+    next_widget = focusable_widgets[next_index]
     
-    if isinstance(next_widget, ColorDropdown):
-        next_widget.label.focus_set()
-    elif isinstance(next_widget, tk.Text):
-        next_widget.focus_set()
-    elif isinstance(next_widget, (ttk.Entry, ttk.Combobox)):
-        next_widget.focus_set()
-        
+    # Special handling for ColorDropdown to focus the label, or the widget itself
+    next_widget.focus_set()
+    
     return "break" # Prevent default Tkinter focus behavior (especially for Up/Down)
     
 def apply_focus_style(event, is_focus_in):
@@ -196,7 +335,7 @@ def apply_focus_style(event, is_focus_in):
     widget = event.widget
     
     # Find the field_frame (the ttk.Frame created in create_input_widgets)
-    if isinstance(widget, tk.Label): # ColorDropdown label
+    if isinstance(widget, tk.Label): # ColorDropdown label or Autofill label
         container_frame = widget.master.master
     elif isinstance(widget, tk.Text): # Text widget
         container_frame = widget.master.master
@@ -419,15 +558,24 @@ class ColorDropdown(tk.Frame):
         self._close_menu()
         if callable(self.on_change):
             # Pass the field name to save_data for bulk update logic
-            field_name = self.master.winfo_children()[0].cget("text").replace(":", "") 
-            self.on_change(field_name)
+            # This logic needs adjustment for the Autofill dropdown
+            if self.master.winfo_children()[0].cget("text") == "Autofill Options:":
+                self.on_change(val) # For Autofill, pass the value as the preset name
+            else:
+                field_name = self.master.winfo_children()[0].cget("text").replace(":", "") 
+                self.on_change(field_name)
             
     def set(self, val: str):
         self.value = val or self.EMPTY_VALUE 
         
         if self.value == self.EMPTY_VALUE:
-            bg, fg = ("#ffffff", "#000000")
-            text = "Select…"
+            # Special handling for the main Autofill dropdown to show "Autofill"
+            if 'autofill_dropdown' in globals() and self is autofill_dropdown:
+                bg, fg = ("#ffffff", "#000000")
+                text = "Autofill"
+            else:
+                bg, fg = ("#ffffff", "#000000")
+                text = "Select…"
         else:
             bg, fg = self.color_map.get(self.value, ("#ffffff", "#000000"))
             text = self.value
@@ -482,11 +630,12 @@ def write_data_to_csv():
     try:
         template_headers = list(field_map.keys())
         # Use 'w' mode to overwrite, ensuring the file reflects the current state (including deletions)
-        with open(auto_save_filepath, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=template_headers)
-            writer.writeheader()
-            if delivery_data:
-                writer.writerows(delivery_data)
+        if auto_save_filepath:
+            with open(auto_save_filepath, 'w', newline='') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=template_headers)
+                writer.writeheader()
+                if delivery_data:
+                    writer.writerows(delivery_data)
         
     except Exception as e:
         # Crucial to alert user if auto-save fails
@@ -1528,7 +1677,7 @@ def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=Tr
     global street_view_image_label, current_street_view_url, current_heading, MIN_IMAGE_WIDTH, MIN_IMAGE_HEIGHT
     
     # NOTE: The 'google_api_key' check now correctly uses the global variable.
-    if not google_api_key or google_api_key == "":
+    if not google_api_key or google_api_key == "AIzaSyBKE225e5Eq4tEyAPqJXO_Hd5grSeoYcqc":
         status_label.config(text="ERROR: Google Maps API key is invalid or missing. Please update it.", anchor=tk.W, foreground="red")
         # Display generic gray box instead of making API call with invalid key
         # Create a blank image to avoid previous exception handling
@@ -1828,14 +1977,37 @@ def on_frame_configure(event):
 scrollable_frame.bind("<Configure>", on_frame_configure)
 
 
-# --- OLD WIDGETS GO INTO THE scrollable_frame ---
+# --- NEW: AUTOFILL DROPDOWN FRAME (ROW 0) ---
+autofill_frame = ttk.Frame(scrollable_frame)
+autofill_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=(0, 5))
+autofill_frame.grid_columnconfigure(1, weight=1)
+
+ttk.Label(autofill_frame, text="Autofill Options:", font=("TkDefaultFont", 10, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 10))
+
+# The actual Autofill dropdown
+autofill_dropdown = ColorDropdown(
+    autofill_frame,
+    # === UPDATED LIST ORDER HERE ===
+    options=["Clear", "Success", "Bad connection", "Missing Package"], 
+    # ===============================
+    color_map=AUTOFILL_SCHEME,
+    on_change=autofill_data # This is the new callback
+)
+autofill_dropdown.set(autofill_dropdown.EMPTY_VALUE)
+autofill_dropdown.label.config(text="Autofill") # Default text for the dropdown
+autofill_dropdown.grid(row=0, column=1, sticky="e") 
+# ----------------------------------------------
+
+
+# --- INPUT WIDGETS FRAME (ROW 1) ---
 input_widgets_frame = ttk.Frame(scrollable_frame) # Change parent to scrollable_frame
-input_widgets_frame.grid(row=0, column=0, sticky="ew") 
+input_widgets_frame.grid(row=1, column=0, sticky="ew") # Change row from 0 to 1
 create_input_widgets()
 
-# --- Image Frame setup for fixed size, left-aligned image ---
+
+# --- Image Frame setup for fixed size, left-aligned image (ROW 2) ---
 street_view_image_frame = ttk.Frame(scrollable_frame, padding=5) # Change parent to scrollable_frame
-street_view_image_frame.grid(row=1, column=0, sticky="nw", pady=(10, 0)) 
+street_view_image_frame.grid(row=2, column=0, sticky="nw", pady=(10, 0)) # Change row from 1 to 2
 
 street_view_image_frame.grid_columnconfigure(0, weight=0) 
 street_view_image_frame.grid_rowconfigure(0, weight=0) 
