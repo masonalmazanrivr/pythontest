@@ -98,7 +98,7 @@ Follow these steps in your terminal to create a standalone executable using PyIn
 2.  **Enter Virtual Environment:** Activate your Python virtual environment (if used): `source venv/bin/activate` (Bash).
 3.  **Run the Build Command:** Execute PyInstaller. The `--hidden-import` ensures the GUI libraries are included:
     ```bash
-    pyinstaller --onefile --hidden-import=PIL._tkinter_finder delivery_tracker_app.py
+    pyinstaller --onefile --windowed --hidden-import=PIL --hidden-import=PIL._imagingtk --hidden-import=PIL._tkinter_finder delivery_tracker_app.py
     ```
 
 ### Running the Program
