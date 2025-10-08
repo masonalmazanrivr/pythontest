@@ -52,7 +52,7 @@ GITHUB_RAW_FILE_URL = "https://raw.githubusercontent.com/masonalmazanrivr/python
 
 # NOTE: REPLACE THESE WITH YOUR ACTUAL KEYS!
 google_api_key = "AIzaSyBKE225e5Eq4tEyAPqJXO_Hd5grSeoYcqc" # Google Maps Street View API Key
-GEMINI_API_KEY = "AIzaSyCDcp2WtRkps_sUsr3b3rTN_mkErQXsdv1I" # Gemini API Key for image processing
+GEMINI_API_KEY = "AIzaSyCDcp2WtRkpsuUsr3b3rTN_mkErQXsdv1I" # Gemini API Key for image processing
 
 # Field definitions
 field_map = {
@@ -1677,7 +1677,7 @@ def fetch_and_display_street_view(address, heading=None, fov=90, cache_result=Tr
     global street_view_image_label, current_street_view_url, current_heading, MIN_IMAGE_WIDTH, MIN_IMAGE_HEIGHT
     
     # NOTE: The 'google_api_key' check now correctly uses the global variable.
-    if not google_api_key or google_api_key == "AIzaSyBKE225e5Eq4tEyAPqJXO_Hd5grSeoYcqc":
+    if not google_api_key or google_api_key == "":
         status_label.config(text="ERROR: Google Maps API key is invalid or missing. Please update it.", anchor=tk.W, foreground="red")
         # Display generic gray box instead of making API call with invalid key
         # Create a blank image to avoid previous exception handling
