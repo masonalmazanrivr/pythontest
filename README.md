@@ -88,7 +88,7 @@ The application requires the following Google API keys to function, which **must
 | API | Purpose |
 | :--- | :--- |
 | **Google Gemini API** | Generating address lists from images. |
-| **Street View Static & Geocoding APIs** | Fetching and displaying static street view images. |
+| **Street View Static API** | Fetching and displaying static street view images. |
 
 ### 🏗️ Building the Executable
 
