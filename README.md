@@ -72,7 +72,13 @@ Click **Export CSV** to save a final `.csv` file containing all the original sto
 
 ### Dependencies
 
-To run or build the application through Visual Studio Code, ensure you have the following packages installed:
+To run or build the application through Visual Studio Code, you will need to install the following dependencies in a virtual environment inside the pythontest folder.
+
+Follow these steps in your terminal:
+
+1.  **Locate the Project Folder:** Navigate to your project directory (e.g., `cd ~/Desktop/pythontest`).
+2.  **Enter Virtual Environment:** Activate your Python virtual environment: `source venv/bin/activate` (Bash).
+3.  **Run Each Package Install Command:** Individually activate each dependency below by typing them into the newly created venv (virtual environment).
 
 | Package | Purpose | Installation |
 | :--- | :--- | :--- |
