@@ -675,14 +675,14 @@ def export_csv_file():
 # -------------------------------------------------------------------
 
 def parse_version(version_str):
-    """Parses a version string (e.g., '25.10.4') into a comparable tuple of integers."""
+    """Parses a version string (e.g., '25.10.4' or '25.10.4.1') into a comparable tuple of integers."""
     # Ensure only digits and dots are considered, then split and convert to int
     clean_version = re.sub(r'[^\d.]', '', version_str)
     try:
-        return tuple(map(int, clean_version.split('.')))
+        return tuple(map(int, clean_version.split('.'))) # This correctly creates (25, 10, 8, 1)
     except ValueError:
         return (0, 0, 0) # Fallback if parsing fails
-
+    
 def check_for_update():
     """
     Checks the GitHub repository's main file for a newer version.
@@ -700,7 +700,8 @@ def check_for_update():
         
         # 3. Search for the APP_VERSION line in the file content
         # Pattern looks for 'APP_VERSION = "X.Y.Z"'
-        match = re.search(r'APP_VERSION\s*=\s*["\'](\d+\.\d+\.\d+)["\']', file_content)
+       # The corrected, more flexible pattern
+        match = re.search(r'APP_VERSION\s*=\s*["\'](\d+(?:\.\d+)+)["\']', file_content)
         
         if match:
             latest_version = match.group(1).strip()
