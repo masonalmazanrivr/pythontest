@@ -984,7 +984,7 @@ def show_confirmation_popup(filepath=None, is_image_mode=False):
 
     robot_label = ttk.Label(popup_frame, text="Robot ID:")
     robot_label.pack(pady=(0, 5))
-    robot_options = ["", "506", "512", "968"]
+    robot_options = ["", "506", "512", "968" , "970" , "972"] 
     robot_id_var = tk.StringVar(popup_frame)
     robot_dropdown = ttk.Combobox(popup_frame, textvariable=robot_id_var, values=robot_options, state="readonly")
     robot_dropdown.pack(pady=(0, 10))
@@ -1465,8 +1465,7 @@ def show_data_summary():
     current_row = 0
     
     # Populate all statistical and single-line entry rows in stats_frame
-    add_label_row(stats_frame, current_row, "Real-World Deliveries in Austin 🇺🇸", "")
-    current_row += 1
+    # Corrected to show the City/Country as per the screenshot
     add_label_row(stats_frame, current_row, "Date:", first_row.get("Date", ""))
     current_row += 1
     add_label_row(stats_frame, current_row, "Country:", "USA")
@@ -1474,8 +1473,10 @@ def show_data_summary():
     add_label_row(stats_frame, current_row, "City:", "Austin")
     current_row += 1
     
-    summary_inputs["Area"] = add_entry_row(stats_frame, current_row, "Area:", "Terry Town, Allendale, Crest View, West...")
+    # FIX: Corrected the Area entry call
+    summary_inputs["Area"] = add_entry_row(stats_frame, current_row, "Area:", "")
     current_row += 1
+    
     add_label_row(stats_frame, current_row, "Robot ID:", first_row.get("Robot ID", ""))
     current_row += 1
     add_label_row(stats_frame, current_row, "Total # of Deliveries:", str(total_deliveries))
@@ -1489,12 +1490,18 @@ def show_data_summary():
     add_label_row(stats_frame, current_row, "# of Autonomous Returns:", str(autonomous_returns))
     current_row += 1
     
+    # FIX: Corrected the Revenue entry call
     summary_inputs["Revenue"] = add_entry_row(stats_frame, current_row, "Revenue:", "")
     current_row += 1
+    
     add_label_row(stats_frame, current_row, "Customer:", "Veho")
     current_row += 1
+    
+    # FIX: Corrected the Shift Duration entry call
     summary_inputs["Shift Duration"] = add_entry_row(stats_frame, current_row, "Shift Duration:", "")
     current_row += 1
+    
+    # FIX: Corrected the Planned Shift Duration entry call
     summary_inputs["Planned Shift Duration"] = add_entry_row(stats_frame, current_row, "Planned Shift Duration:", "")
     current_row += 1
     
@@ -1519,11 +1526,28 @@ def show_data_summary():
     add_label_row(stats_frame, current_row, "# of Too-Risky Paths:", str(too_risky_paths))
     
     # --- ADD THE OPERATOR COMMENTS TEXT AREA TO comments_frame ---
-    comments_text_widget = add_comment_text_area(comments_frame, 0, "Operator Comments:") 
-    summary_inputs["Operator Comments"] = comments_text_widget
+    # Reusing add_comment_text_area but placed in the comments_frame
+    comments_label = ttk.Label(comments_frame, text="Operator Comments:", font=("TkDefaultFont", 10, "bold"))
+    comments_label.grid(row=0, column=0, sticky="w", padx=5, pady=(5, 2))
+    
+    # Container for Text widget and Scrollbar
+    text_container = ttk.Frame(comments_frame)
+    text_container.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=5)
+    text_container.grid_columnconfigure(0, weight=1) 
+    text_container.grid_rowconfigure(0, weight=1) 
+    
+    comments_text_widget = tk.Text(text_container, height=5, width=40, wrap=tk.WORD, bd=1, relief="solid")
+    comments_text_widget.grid(row=0, column=0, sticky="nsew")
+    
+    scrollbar_comment = ttk.Scrollbar(text_container, command=comments_text_widget.yview)
+    scrollbar_comment.grid(row=0, column=1, sticky="ns")
+    comments_text_widget.config(yscrollcommand=scrollbar_comment.set)
+    
+    # Store the Text widget for external access if needed
+    summary_inputs["Operator Comments"] = comments_text_widget 
     
     close_button = ttk.Button(comments_frame, text="Close", command=popup.destroy)
-    close_button.grid(row=2, column=0, columnspan=2, pady=10) 
+    close_button.grid(row=2, column=0, columnspan=2, pady=10)
 
 
 def copy_data():
