@@ -29,7 +29,7 @@ image_cache = {}
 street_view_image_label = None
 
 # GLOBAL VERSION DEFINITION
-APP_VERSION = "25.10.14.1"
+APP_VERSION = "25.10.30.1"
 
 # GLOBAL VARIABLE FOR AUTO-SAVE
 auto_save_filepath = None
@@ -1375,7 +1375,11 @@ def show_data_summary():
         status_label.config(text="No data to summarize. Please load a CSV first.", anchor=tk.W)
         return
         
-    total_deliveries = len(delivery_data)
+    # --- FILTER OUT MISSING DELIVERIES FOR ACCURATE COUNTS ---
+    # Create a filtered list of stops that are not marked as "Missing"
+    non_missing_data = [row for row in delivery_data if row.get("Success") != "Missing"]
+    
+    total_deliveries = len(non_missing_data)
     robot_deliveries = 0
     autonomous_returns = 0
     soft_interventions = 0
@@ -1390,10 +1394,10 @@ def show_data_summary():
     
     intended_robot_deliveries = 0
     
-    for row in delivery_data:
+    for row in non_missing_data: # Iterate over the filtered data
         success_status = row.get("Success")
         
-        # --- Only count stops with definite Yes or No status ---
+        # --- Only count stops with definite Yes or No status (from the non-missing subset) ---
         if success_status in ["Yes", "No"]:
             intended_robot_deliveries += 1
             
@@ -1479,6 +1483,7 @@ def show_data_summary():
     
     add_label_row(stats_frame, current_row, "Robot ID:", first_row.get("Robot ID", ""))
     current_row += 1
+    # --- UPDATED TO USE total_deliveries (non_missing_data length) ---
     add_label_row(stats_frame, current_row, "Total # of Deliveries:", str(total_deliveries))
     current_row += 1
     
