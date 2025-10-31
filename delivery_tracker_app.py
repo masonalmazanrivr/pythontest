@@ -29,7 +29,7 @@ image_cache = {}
 street_view_image_label = None
 
 # GLOBAL VERSION DEFINITION
-APP_VERSION = "25.10.30.1"
+APP_VERSION = "25.10.31.1"
 
 # GLOBAL VARIABLE FOR AUTO-SAVE
 auto_save_filepath = None
@@ -73,6 +73,7 @@ field_map = {
     "Gated environment": {"type": "dropdown", "options": ["No gates", "Gates"]},
     "Payload addressability": {"type": "dropdown", "options": ["Order was delivered", "Payload issues", "Oversized package", "N/A"]},
     "Too risky to try": {"type": "dropdown", "options": ["Not risky", "Too risky", "N/A"]},
+    "Mobile Hub": {"type": "dropdown", "options": ["Successful", "Unsuccessful", "N/A"]},
     "Operator Comments": {"type": "input"},
 }
 
@@ -143,6 +144,11 @@ COLOR_SCHEMES = {
         "Too risky": (RED, FG_ON),
         "N/A": (LGRAY, FG_OFF),
     },
+    "Mobile Hub": {
+        "Successful": (GREEN, FG_ON),
+        "Unsuccessful": (RED, FG_ON),
+        "N/A": (LGRAY, FG_OFF),
+    },
 }
 
 # -------------------------------------------------------------------
@@ -154,7 +160,7 @@ AUTOFILL_FIELDS = [
     "Success", "Soft help from Field Operator", "Field Operator physically intervened",
     "Autonomous Return", "Order placement", "Robot health", "Connectivity",
     "Cluttered environment", "Gated environment", "Payload addressability",
-    "Too risky to try", "Operator Comments"
+    "Too risky to try", "Mobile Hub", "Operator Comments"
 ]
 
 AUTOFILL_PRESETS = {
@@ -1391,6 +1397,7 @@ def show_data_summary():
     gates_or_doors = 0
     missing_payload_functionalities = 0
     too_risky_paths = 0
+    mobile_hub_success = 0
     
     intended_robot_deliveries = 0
     
@@ -1424,6 +1431,8 @@ def show_data_summary():
             missing_payload_functionalities += 1
         if row.get("Too risky to try") == "Too risky":
             too_risky_paths += 1
+        if row.get("Mobile Hub") == "Successful":
+            mobile_hub_success += 1
 
     popup = tk.Toplevel(root)
     popup.title("Real-World Deliveries Summary")
@@ -1529,6 +1538,8 @@ def show_data_summary():
     add_label_row(stats_frame, current_row, "# of Missing Payload Functionalities:", str(missing_payload_functionalities))
     current_row += 1
     add_label_row(stats_frame, current_row, "# of Too-Risky Paths:", str(too_risky_paths))
+    current_row += 1
+    add_label_row(stats_frame, current_row, "# of Remote Hub Success", str(mobile_hub_success))
     
     # --- ADD THE OPERATOR COMMENTS TEXT AREA TO comments_frame ---
     # Reusing add_comment_text_area but placed in the comments_frame
@@ -1991,18 +2002,28 @@ canvas.bind_all("<Button-5>", _on_mouse_wheel)   # Linux scroll down
 
 
 # Configure the canvas scroll region and the frame's width
+# Configure the canvas scroll region and the frame's width
 def on_canvas_configure(event):
     # Update the scroll region of the canvas
     canvas.configure(scrollregion=canvas.bbox("all"))
     # Ensure the scrollable frame's width matches the canvas's width
-    # event.width is the current width of the canvas
     canvas.itemconfig(canvas_window, width=event.width)
+    
+    # --- FIX: REMOVE canvas.yview_moveto(0.0) from here. ---
+    # This was preventing proper initial scroll positioning.
 
 canvas.bind("<Configure>", on_canvas_configure)
 
 # Bind a function to the scrollable_frame's size changes to update scrollregion
+# Bind a function to the scrollable_frame's size changes to update scrollregion
 def on_frame_configure(event):
+    # 1. Update the scroll region based on the content's final size
     canvas.configure(scrollregion=canvas.bbox("all"))
+    
+    # 2. --- ADDED FIX: Force the scroll bar to reset to the absolute top. ---
+    # This addresses the overshoot issue when content changes or on initial load.
+    canvas.yview_moveto(0.0) 
+    # --------------------------------------------------------------------------
 
 scrollable_frame.bind("<Configure>", on_frame_configure)
 
