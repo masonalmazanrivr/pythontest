@@ -74,6 +74,7 @@ field_map = {
     "Payload addressability": {"type": "dropdown", "options": ["Order was delivered", "Payload issues", "Oversized package", "N/A"]},
     "Too risky to try": {"type": "dropdown", "options": ["Not risky", "Too risky", "N/A"]},
     "Mobile Hub": {"type": "dropdown", "options": ["Successful", "Unsuccessful", "N/A"]},
+    "Did the parcel drop on the first package": {"type": "dropdown", "options": ["1st try", "2nd try", "3rd try"]},
     "Operator Comments": {"type": "input"},
 }
 
@@ -148,6 +149,11 @@ COLOR_SCHEMES = {
         "Successful": (GREEN, FG_ON),
         "Unsuccessful": (RED, FG_ON),
         "N/A": (LGRAY, FG_OFF),
+    },
+    "Did the parcel drop on the first package": {
+        "1st try": (GREEN, FG_ON),
+        "2nd try": (YELLOW, FG_ON),
+        "3rd try": (RED, FG_OFF),
     },
 }
 
@@ -1398,6 +1404,7 @@ def show_data_summary():
     missing_payload_functionalities = 0
     too_risky_paths = 0
     mobile_hub_success = 0
+    parcel_drop_success = 0
     
     intended_robot_deliveries = 0
     
@@ -1433,6 +1440,9 @@ def show_data_summary():
             too_risky_paths += 1
         if row.get("Mobile Hub") == "Successful":
             mobile_hub_success += 1
+        if row.get("Did the parcel drop on the first package") == "1st try":
+            parcel_drop_success += 1
+
 
     popup = tk.Toplevel(root)
     popup.title("Real-World Deliveries Summary")
@@ -1540,6 +1550,7 @@ def show_data_summary():
     add_label_row(stats_frame, current_row, "# of Too-Risky Paths:", str(too_risky_paths))
     current_row += 1
     add_label_row(stats_frame, current_row, "# of Remote Hub Success", str(mobile_hub_success))
+    add_label_row(stats_frame, current_row, "# of Parcel Drop Success", str(parcel_drop_success))
     
     # --- ADD THE OPERATOR COMMENTS TEXT AREA TO comments_frame ---
     # Reusing add_comment_text_area but placed in the comments_frame
@@ -1935,8 +1946,8 @@ paste_button = ttk.Button(control_frame, text="Paste Data", command=paste_data)
 paste_button.pack(side=tk.LEFT, padx=(10, 0))
 
 # --- DELETE BUTTON ---
-delete_button = ttk.Button(control_frame, text="Delete Stop", command=delete_selected_stop)
-delete_button.pack(side=tk.LEFT, padx=(10, 0))
+#delete_button = ttk.Button(control_frame, text="Delete Stop", command=delete_selected_stop)
+#delete_button.pack(side=tk.LEFT, padx=(10, 0))
 # ---------------------
 
 columns = ("ID in the Route", "Address")
