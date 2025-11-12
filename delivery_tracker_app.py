@@ -29,7 +29,7 @@ image_cache = {}
 street_view_image_label = None
 
 # GLOBAL VERSION DEFINITION
-APP_VERSION = "25.11.11.1"
+APP_VERSION = "25.11.12.2"
 
 # GLOBAL VARIABLE FOR AUTO-SAVE
 auto_save_filepath = None
@@ -153,9 +153,9 @@ COLOR_SCHEMES = {
     #},
     "Did the parcel drop on the first package": {
         "1st try": (GREEN, FG_ON),
-        "2nd try": (YELLOW, FG_ON),
+        "2nd try": (YELLOW, FG_OFF),
         "3rd+ try": (PINK, FG_OFF),
-        "Unsuccessful" : (RED, FG_OFF),
+        "Unsuccessful" : (RED, FG_ON),
     },
 }
 
@@ -206,6 +206,21 @@ AUTOFILL_PRESETS = {
         "Operator Comments": "hand delivery, bad connection"
     },
     # 4. Missing Package Preset 
+    "Oversized Package": {
+        "Success": "No", 
+        "Soft help from Field Operator": "N/A", 
+        "Field Operator physically intervened": "Needed help", 
+        "Autonomous Return": "Not used", 
+        "Order placement": "N/A", 
+        "Robot health": "No faults", 
+        "Connectivity": "N/A", 
+        "Cluttered environment": "N/A", 
+        "Gated environment": "No gates", 
+        "Payload addressability": "Oversized package", 
+        "Too risky to try": "N/A", 
+        "Operator Comments": "hand delivery, package is oversized."
+    },
+    # 5. Missing Package Preset 
     "Missing Package": {
         "Success": "Missing", 
         "Soft help from Field Operator": "N/A", 
@@ -219,6 +234,51 @@ AUTOFILL_PRESETS = {
         "Payload addressability": "N/A", 
         "Too risky to try": "N/A", 
         "Operator Comments": "Missing Package"
+    },
+        # 6. Business Preset 
+    "Business": {
+        "Success": "No", 
+        "Soft help from Field Operator": "N/A", 
+        "Field Operator physically intervened": "Needed help", 
+        "Autonomous Return": "Not used", 
+        "Order placement": "N/A", 
+        "Robot health": "No faults", 
+        "Connectivity": "N/A", 
+        "Cluttered environment": "N/A", 
+        "Gated environment": "No gates", 
+        "Payload addressability": "N/A", 
+        "Too risky to try": "N/A", 
+        "Operator Comments": "Location was business, skipped by robot."
+    },
+           # 6. Cluttered Preset 
+    "Cluttered Pathway": {
+        "Success": "No", 
+        "Soft help from Field Operator": "N/A", 
+        "Field Operator physically intervened": "Needed help", 
+        "Autonomous Return": "Not used", 
+        "Order placement": "N/A", 
+        "Robot health": "No faults", 
+        "Connectivity": "N/A", 
+        "Cluttered environment": "Path too tight", 
+        "Gated environment": "No gates", 
+        "Payload addressability": "N/A", 
+        "Too risky to try": "Too risky", 
+        "Operator Comments": "Location was too cluttered, skipped by robot."
+    },
+       # 8. Skipped for Time Preset 
+    "Skipped for Time": {
+        "Success": "Skipped by robot", 
+        "Soft help from Field Operator": "N/A", 
+        "Field Operator physically intervened": "Needed help", 
+        "Autonomous Return": "Not used", 
+        "Order placement": "N/A", 
+        "Robot health": "No faults", 
+        "Connectivity": "N/A", 
+        "Cluttered environment": "N/A", 
+        "Gated environment": "No gates", 
+        "Payload addressability": "N/A", 
+        "Too risky to try": "N/A", 
+        "Operator Comments": "Skipped by robot to save time"
     }
 }
 
@@ -227,6 +287,9 @@ AUTOFILL_SCHEME = {
     "Missing Package": (LGRAY, FG_OFF), 
     "Clear": (LGRAY, FG_OFF),
     "Bad connection": (RED, FG_ON),
+    "Oversized Package": (YELLOW, FG_OFF),
+    "Business": (LGRAY, FG_OFF),
+    "Skipped for Time": (LGRAY, FG_OFF),
 }
 
 
@@ -606,28 +669,43 @@ class ColorDropdown(tk.Frame):
 
 def initialize_auto_save_file(date, robot_id, source_name):
     """
-    Sets the global auto_save_filepath to a file in the user's home/temp directory 
-    and writes the initial header.
+    Sets the global auto_save_filepath to a file in the local 'autosaves' directory
+    (relative to the script) and writes the initial header.
     """
     global auto_save_filepath
     
-    # Create a unique filename based on date and robot ID
+    # 1. Determine the script's directory
+    # os.path.realpath(__file__) is robust for finding the script's location
+    # os.path.dirname() gets the directory of the script
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    
+    # 2. Define the path for the local 'autosaves' folder
+    save_dir = os.path.join(script_dir, "autosaves")
+    
+    # 3. Create the 'autosaves' directory if it doesn't exist
+    try:
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+    except Exception as e:
+        status_label.config(text=f"Error creating 'autosaves' directory: {e}", anchor=tk.W, foreground="red")
+        auto_save_filepath = None
+        return
+
+    # 4. Create a unique filename
     filename = f"autosave_report_{date.replace('/', '-')}_{robot_id}_{datetime.now().strftime('%H%M%S')}.csv"
     
-    # Use a directory inside the user's home or a system temporary directory
-    # For simplicity and cross-platform compatibility, let's use a temp directory
-    save_dir = tempfile.gettempdir()
-    
+    # 5. Set the final auto-save path
     auto_save_filepath = os.path.join(save_dir, filename)
     
-    # Write the header row
+    # 6. Write the header row (rest of the original logic)
     try:
         template_headers = list(field_map.keys())
         with open(auto_save_filepath, 'w', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=template_headers)
             writer.writeheader()
         
-        status_label.config(text=f"Loaded {len(delivery_data)} stops from '{source_name}'. Auto-saving to: {auto_save_filepath}", anchor=tk.W, foreground="black")
+        # NOTE: Update the status message to reflect the local path
+        status_label.config(text=f"Loaded {len(delivery_data)} stops from '{source_name}'. Auto-saving to: {os.path.basename(save_dir)}/{filename}", anchor=tk.W, foreground="black")
     
     except Exception as e:
         status_label.config(text=f"Error initializing auto-save file: {e}", anchor=tk.W, foreground="red")
@@ -1026,7 +1104,8 @@ def show_confirmation_popup(filepath=None, is_image_mode=False):
 
 def start_data_load(source, date, robot_id, is_content=False):
     """
-    Loads data into the application.
+    Loads data into the application, ensuring consistency across new entries
+    and applying default values for 'Function' and 'Packages' if missing.
     """
     global delivery_data
     delivery_data = []
@@ -1074,8 +1153,13 @@ def start_data_load(source, date, robot_id, is_content=False):
             new_row['Date'] = date
             new_row['Robot ID'] = robot_id
             
-            # Use 'Commercial' if the 'Function' field is not present or is empty in the source data.
+            # Set Function default
             new_row['Function'] = new_row.get('Function', 'Commercial') or 'Commercial' 
+            
+            # Set Packages default (CORRECTED LOGIC)
+            packages_value = new_row.get('Packages', '').strip()
+            if packages_value == '':
+                new_row['Packages'] = '1'
             
             if id_column_name == 'Stop Number':
                 route_id = row.get('Stop Number', '').strip()
@@ -2053,7 +2137,7 @@ ttk.Label(autofill_frame, text="Autofill Options:", font=("TkDefaultFont", 10, "
 autofill_dropdown = ColorDropdown(
     autofill_frame,
     # === UPDATED LIST ORDER HERE ===
-    options=["Clear", "Success", "Bad connection", "Missing Package"], 
+    options=["Clear", "Success", "Bad connection", "Oversized Package", "Business", "Cluttered Pathway", "Skipped for Time", "Missing Package"], 
     # ===============================
     color_map=AUTOFILL_SCHEME,
     on_change=autofill_data # This is the new callback
