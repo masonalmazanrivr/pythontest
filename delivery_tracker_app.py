@@ -29,7 +29,7 @@ image_cache = {}
 street_view_image_label = None
 
 # GLOBAL VERSION DEFINITION
-APP_VERSION = "25.11.12.2"
+APP_VERSION = "25.11.13.1"
 
 # GLOBAL VARIABLE FOR AUTO-SAVE
 auto_save_filepath = None
@@ -74,7 +74,7 @@ field_map = {
     "Payload addressability": {"type": "dropdown", "options": ["Order was delivered", "Payload issues", "Oversized package", "N/A"]},
     "Too risky to try": {"type": "dropdown", "options": ["Not risky", "Too risky", "N/A"]},
     #"Mobile Hub": {"type": "dropdown", "options": ["Successful", "Unsuccessful", "N/A"]},
-    "Did the parcel drop on the first package": {"type": "dropdown", "options": ["1st try", "2nd try", "3rd+ try", "Unsuccessful"]},
+    "Did the parcel drop on the first package": {"type": "dropdown", "options": ["1st try", "2nd try", "3rd+ try", "Unsuccessful", "N/A"]},
     "Operator Comments": {"type": "input"},
 }
 
@@ -156,6 +156,7 @@ COLOR_SCHEMES = {
         "2nd try": (YELLOW, FG_OFF),
         "3rd+ try": (PINK, FG_OFF),
         "Unsuccessful" : (RED, FG_ON),
+        "N/A": (LGRAY, FG_OFF),
     },
 }
 
